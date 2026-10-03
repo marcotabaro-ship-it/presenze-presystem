@@ -15,10 +15,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.5.0">
+  <link rel="stylesheet" href="style.css?v=1.7.0">
 </head>
 <body>
   <header class="testata">
+    <button class="btn-menu" type="button" onclick="alternaMenu()" aria-label="Apri o compatta il menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
     <img class="testata-icona" src="icons/icon-192.png" alt="">
     <div class="testata-txt">
       <div class="testata-app">Presenze</div>
@@ -26,6 +29,30 @@
     </div>
     <button class="btn-testata" id="btnAggiorna" type="button" onclick="sincronizza(false)">Aggiorna</button>
   </header>
+
+  <aside class="laterale" aria-label="Menu">
+    <button type="button" class="menu-voce" data-vista="home" onclick="vai('home')" title="Calendario">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="1.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></svg>
+      <span>Calendario</span>
+    </button>
+    <button type="button" class="menu-voce" data-vista="nuova" onclick="vai('nuova')" title="Nuova">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v8M8 12h8"/></svg>
+      <span>Nuova</span>
+    </button>
+    <button type="button" class="menu-voce" data-vista="richieste" onclick="vai('richieste')" title="Richieste">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5h12M8 12h12M8 17.5h12"/><circle cx="4.5" cy="6.5" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg>
+      <span>Richieste</span>
+    </button>
+    <button type="button" class="menu-voce" data-vista="rapportino" onclick="vai('rapportino')" title="Rapportino">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 15.5h6"/></svg>
+      <span>Rapportino</span>
+    </button>
+    <div class="menu-separatore"></div>
+    <button type="button" class="menu-voce" data-vista="impostazioni" onclick="vai('impostazioni')" title="Impostazioni">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>
+      <span>Impostazioni</span>
+    </button>
+  </aside>
 
   <main class="contenuto">
     <section class="vista" id="v-collega"></section>
@@ -64,6 +91,6 @@
   <div class="avviso" id="avviso" role="status" aria-live="polite"></div>
   <div class="attesa nascosto" id="attesa"><div class="attesa-barra"></div></div>
 
-  <script src="app.js?v=1.5.0"></script>
+  <script src="app.js?v=1.7.0"></script>
 </body>
 </html>

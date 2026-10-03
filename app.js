@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "1.5.0";
+var VERSIONE = "1.7.0";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -241,6 +241,7 @@ function oggiLocale() { return isoDaData(new Date()); }
 
 function api(azione, args, cfgProva) {
   var cfg = cfgProva || leggiCfg();
+  if (!cfg && azione === "accediConPin") cfg = { url: MOTORE_URL, token: "" };
   if (!cfg) return Promise.reject(new Error("Dispositivo non collegato."));
   var corpo = JSON.stringify({ token: cfg.token, azione: azione, args: args || [] });
   var codificato = encodeURIComponent(corpo);
@@ -261,7 +262,8 @@ function api(azione, args, cfgProva) {
 
 function messaggioErrore(err) {
   if (!navigator.onLine) return "Nessuna connessione: puoi consultare i dati, ma per registrare serve la rete.";
-  if (err && err.codice === "TOKEN") return "Codice di accesso non valido: collega di nuovo il dispositivo.";
+  if (err && err.codice === "TOKEN") return "Accesso scaduto o PIN cambiato: inserisci il PIN.";
+  if (err && err.codice === "PIN") return err.message;
   if (err && err.name === "TypeError") return "Motore dati non raggiungibile: controlla la connessione o l'indirizzo /exec.";
   return (err && err.message) ? err.message : String(err);
 }
@@ -327,7 +329,15 @@ function copiaVecchio(testo) {
 /* ---------------------------------------------------------
    AVVIO E NAVIGAZIONE
    --------------------------------------------------------- */
+/* Menu laterale (schermi larghi): aperto o compatto, scelta ricordata */
+function alternaMenu() {
+  var compatto = !document.body.classList.contains("menu-compatto");
+  document.body.classList.toggle("menu-compatto", compatto);
+  try { localStorage.setItem("pps.menu", compatto ? "compatto" : "aperto"); } catch (e) { }
+}
+
 function avvio() {
+  try { if (localStorage.getItem("pps.menu") === "compatto") document.body.classList.add("menu-compatto"); } catch (e) { }
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(function () { });
   }
@@ -408,7 +418,7 @@ function vai(vista, mantieniScroll) {
   S.vista = vista;
   var viste = ["collega", "home", "nuova", "richieste", "rapportino", "impostazioni"];
   viste.forEach(function (v) { el("v-" + v).classList.toggle("attiva", v === vista); });
-  Array.prototype.forEach.call(document.querySelectorAll(".scheda"), function (b) {
+  Array.prototype.forEach.call(document.querySelectorAll(".scheda, .menu-voce"), function (b) {
     b.classList.toggle("attiva", b.getAttribute("data-vista") === vista);
   });
   if (vista === "home") renderHome();
@@ -424,15 +434,41 @@ function vai(vista, mantieniScroll) {
    --------------------------------------------------------- */
 function mostraCollega() {
   document.body.classList.add("scollegato");
-  var h = "<div class='collega'><h1>Collega questo dispositivo</h1>";
-  h += "<p class='aiuto'>Si fa una volta sola per dispositivo: poi l'app si apre direttamente dall'icona. Il modo più veloce è aprire il link di collegamento che hai salvato nelle note.</p>";
+  var h = "<div class='collega'><h1>Accedi</h1>";
+  h += "<p class='aiuto'>Inserisci il tuo PIN di 6 cifre. Serve una volta sola su questo dispositivo: poi l'app si apre direttamente dall'icona.</p>";
   h += "<div class='blocco'>";
-  h += "<button type='button' class='btn btn-primario' onclick='incollaDagliAppunti()'>Incolla il link copiato</button>";
+  h += "<div class='campo'><label for='k-pin'>PIN</label><input type='password' id='k-pin' class='campo-pin' inputmode='numeric' pattern='[0-9]*' maxlength='6' autocomplete='current-password' oninput='pinDigitato()'></div>";
+  h += "<button type='button' class='btn btn-primario' onclick='accediPin()'>Accedi</button>";
+  h += "</div>";
+  h += "<details class='altro-accesso'><summary>Non hai ancora un PIN? Usa il link di collegamento</summary><div class='blocco' style='margin-top:8px'>";
+  h += "<button type='button' class='btn' onclick='incollaDagliAppunti()'>Incolla il link copiato</button>";
   h += "<div class='campo' style='margin-top:10px'><label for='k-token'>Oppure incolla qui il link o il codice di accesso</label><input type='text' id='k-token' autocomplete='off' autocapitalize='off' spellcheck='false'></div>";
   h += "<button type='button' class='btn' onclick='collega()'>Collega</button>";
-  h += "</div><div class='versione'>Presenze Pre System, versione " + VERSIONE + "</div></div>";
+  h += "</div></details>";
+  h += "<div class='versione'>Presenze Pre System, versione " + VERSIONE + "</div></div>";
   el("v-collega").innerHTML = h;
   vai("collega");
+  setTimeout(function () { var p = el("k-pin"); if (p) p.focus(); }, 150);
+}
+
+function pinDigitato() {
+  var p = el("k-pin");
+  p.value = p.value.replace(/[^0-9]/g, "").slice(0, 6);
+  if (p.value.length === 6) accediPin();
+}
+
+function accediPin() {
+  var p = el("k-pin");
+  var pin = p ? p.value : "";
+  if (!/^[0-9]{6}$/.test(pin)) { avviso("Il PIN è di 6 cifre.", true); return; }
+  el("attesa").classList.remove("nascosto");
+  api("accediConPin", [pin]).then(function (res) {
+    provaCollegamento(res.token);
+  }).catch(function (err) {
+    el("attesa").classList.add("nascosto");
+    if (p) { p.value = ""; p.focus(); }
+    avviso(messaggioErrore(err), true);
+  });
 }
 
 function incollaDagliAppunti() {
@@ -1177,72 +1213,113 @@ function generaRapportino() {
    --------------------------------------------------------- */
 function renderImpostazioni() {
   var imp = S.dati.impostazioni;
-  var h = [];
+  var caps = [];
 
-  h.push("<div class='blocco'><h3>Destinatari</h3>");
-  h.push("<p class='aiuto'>Gli indirizzi tolti restano in archivio come obsoleti, con la data, e si possono riattivare.</p>");
+  /* Destinatari */
+  var d = [];
+  d.push("<p class='aiuto'>Gli indirizzi tolti restano in archivio come obsoleti, con la data, e si possono riattivare.</p>");
+  var nAttivi = 0;
   [["RAPPORTINO", "Rapportino mensile"], ["RICHIESTE", "Richieste e comunicazioni"]].forEach(function (u) {
-    var lista = (S.dati.destinatari || []).filter(function (d) { return d.uso === u[0]; });
-    var attivi = lista.filter(function (d) { return d.stato === "ATTIVO"; }).sort(function (a, b) { return a.campo === b.campo ? 0 : (a.campo === "A" ? -1 : 1); });
-    var obs = lista.filter(function (d) { return d.stato !== "ATTIVO"; });
-    h.push("<div style='margin-top:12px'><b>" + u[1] + "</b></div>");
-    if (!attivi.length) h.push("<div class='vuoto'>Nessun indirizzo attivo.</div>");
-    attivi.forEach(function (d) { h.push(rigaDestinatario(d)); });
+    var lista = (S.dati.destinatari || []).filter(function (x) { return x.uso === u[0]; });
+    var attivi = lista.filter(function (x) { return x.stato === "ATTIVO"; }).sort(function (x, y) { return x.campo === y.campo ? 0 : (x.campo === "A" ? -1 : 1); });
+    var obs = lista.filter(function (x) { return x.stato !== "ATTIVO"; });
+    nAttivi += attivi.length;
+    d.push("<div style='margin-top:12px'><b>" + u[1] + "</b></div>");
+    if (!attivi.length) d.push("<div class='vuoto'>Nessun indirizzo attivo.</div>");
+    attivi.forEach(function (x) { d.push(rigaDestinatario(x)); });
     if (obs.length) {
-      h.push("<details><summary>Indirizzi obsoleti (" + obs.length + ")</summary>");
-      obs.forEach(function (d) { h.push(rigaDestinatario(d)); });
-      h.push("</details>");
+      d.push("<details><summary>Indirizzi obsoleti (" + obs.length + ")</summary>");
+      obs.forEach(function (x) { d.push(rigaDestinatario(x)); });
+      d.push("</details>");
     }
   });
-  h.push("<button type='button' class='btn' style='margin-top:12px' onclick='apriNuovoDestinatario()'>Aggiungi un indirizzo</button></div>");
+  d.push("<button type='button' class='btn' style='margin-top:12px' onclick='apriNuovoDestinatario()'>Aggiungi un indirizzo</button>");
+  caps.push(["destinatari", "Destinatari", nAttivi + (nAttivi === 1 ? " indirizzo attivo" : " indirizzi attivi"), d.join("")]);
 
-  h.push(bloccoTesti());
+  /* Testi */
+  caps.push(["testi", "Testi delle richieste", "Mail di ferie e permessi", bloccoTesti()]);
 
-  h.push("<div class='blocco'><h3>Dati e orario di lavoro</h3>");
-  h.push(campoTesto("i-NOME_DIPENDENTE", "Nome nelle mail", imp.NOME_DIPENDENTE, "text"));
-  h.push(campoTesto("i-NOME_REPORT", "Nome nel rapportino", imp.NOME_REPORT, "text"));
-  h.push(campoTesto("i-AZIENDA", "Azienda", imp.AZIENDA, "text"));
-  h.push(campoTesto("i-DATA_INIZIO_RAPPORTO", "Data di inizio del rapporto (i giorni prima non vengono conteggiati)", imp.DATA_INIZIO_RAPPORTO, "date"));
-  h.push("<div class='riga2'>" + campoTesto("i-MATTINA_INIZIO", "Mattina dalle", imp.MATTINA_INIZIO, "time") + campoTesto("i-MATTINA_FINE", "Mattina alle", imp.MATTINA_FINE, "time") + "</div>");
-  h.push("<div class='riga2'>" + campoTesto("i-POMERIGGIO_INIZIO", "Pomeriggio dalle", imp.POMERIGGIO_INIZIO, "time") + campoTesto("i-POMERIGGIO_FINE", "Pomeriggio alle", imp.POMERIGGIO_FINE, "time") + "</div>");
-  h.push("<div class='campo'><label for='i-FIRMA_MAIL'>Firma delle mail</label><textarea id='i-FIRMA_MAIL'>" + esc(imp.FIRMA_MAIL) + "</textarea></div>");
-  h.push("<button type='button' class='btn btn-primario' onclick='salvaImpostazioni()'>Salva i dati</button></div>");
-
-  h.push("<div class='blocco'><h3>Chiusure aziendali</h3>");
-  h.push("<p class='aiuto'>Le inserisci dalla sezione Nuova, scegliendo Chiusura aziendale. Ogni giorno lavorativo del periodo vale come ferie collettive. Le festività nazionali, Pasquetta e San Francesco sono già incluse.</p>");
+  /* Chiusure */
+  var c = [];
+  c.push("<p class='aiuto'>Le inserisci dalla sezione Nuova, scegliendo Chiusura aziendale. Ogni giorno lavorativo del periodo vale come ferie collettive. Le festività nazionali, Pasquetta e San Francesco sono già incluse.</p>");
   var annoFa = piuGiorni(S.dati.oggi, -365);
   var periodi = periodiChiusura().filter(function (p) { return p.al >= annoFa; });
-  if (!periodi.length) h.push("<div class='vuoto'>Nessuna chiusura registrata.</div>");
+  if (!periodi.length) c.push("<div class='vuoto'>Nessuna chiusura registrata.</div>");
   periodi.forEach(function (p) {
     var nl = lavorativiTra(p.dal, p.al);
-    h.push("<div class='dest'><div class='dest-corpo'><div class='dest-nome'>" + esc(p.descrizione) + "</div><div class='dest-mail'>Dal " + esc(dataBreve(p.dal)) + " al " + esc(dataBreve(p.al)) + ", " + nl + (nl === 1 ? " giorno" : " giorni") + " di ferie collettive</div></div><button type='button' class='btn btn-piccolo btn-pericolo' onclick='confermaEliminaChiusura(\"" + p.id + "\")'>Elimina</button></div>");
+    c.push("<div class='dest'><div class='dest-corpo'><div class='dest-nome'>" + esc(p.descrizione) + "</div><div class='dest-mail'>Dal " + esc(dataBreve(p.dal)) + " al " + esc(dataBreve(p.al)) + ", " + nl + (nl === 1 ? " giorno" : " giorni") + " di ferie collettive</div></div><button type='button' class='btn btn-piccolo btn-pericolo' onclick='confermaEliminaChiusura(\"" + p.id + "\")'>Elimina</button></div>");
+  });
+  c.push("<button type='button' class='btn' style='margin-top:10px' onclick='nuovaDa(\"CHIUSURA\",\"" + S.dati.oggi + "\")'>Inserisci una chiusura</button>");
+  caps.push(["chiusure", "Chiusure aziendali", periodi.length ? periodi.length + (periodi.length === 1 ? " periodo registrato" : " periodi registrati") : "Nessuna chiusura registrata", c.join("")]);
+
+  /* Dati e orario */
+  var o = [];
+  o.push(campoTesto("i-NOME_DIPENDENTE", "Nome nelle mail", imp.NOME_DIPENDENTE, "text"));
+  o.push(campoTesto("i-NOME_REPORT", "Nome nel rapportino", imp.NOME_REPORT, "text"));
+  o.push(campoTesto("i-AZIENDA", "Azienda", imp.AZIENDA, "text"));
+  o.push(campoTesto("i-DATA_INIZIO_RAPPORTO", "Data di inizio del rapporto (i giorni prima non vengono conteggiati)", imp.DATA_INIZIO_RAPPORTO, "date"));
+  o.push("<div class='riga2'>" + campoTesto("i-MATTINA_INIZIO", "Mattina dalle", imp.MATTINA_INIZIO, "time") + campoTesto("i-MATTINA_FINE", "Mattina alle", imp.MATTINA_FINE, "time") + "</div>");
+  o.push("<div class='riga2'>" + campoTesto("i-POMERIGGIO_INIZIO", "Pomeriggio dalle", imp.POMERIGGIO_INIZIO, "time") + campoTesto("i-POMERIGGIO_FINE", "Pomeriggio alle", imp.POMERIGGIO_FINE, "time") + "</div>");
+  o.push("<div class='campo'><label for='i-FIRMA_MAIL'>Firma delle mail</label><textarea id='i-FIRMA_MAIL'>" + esc(imp.FIRMA_MAIL) + "</textarea></div>");
+  o.push("<button type='button' class='btn btn-primario' onclick='salvaImpostazioni()'>Salva i dati</button>");
+  caps.push(["dati", "Dati e orario di lavoro", imp.MATTINA_INIZIO + "-" + imp.MATTINA_FINE + " / " + imp.POMERIGGIO_INIZIO + "-" + imp.POMERIGGIO_FINE + (imp.DATA_INIZIO_RAPPORTO ? "" : ", manca la data di inizio"), o.join(""), !imp.DATA_INIZIO_RAPPORTO]);
+
+  /* PIN */
+  var p = [];
+  p.push("<p class='aiuto'>" + (S.dati.haPin ? "Il PIN è impostato. Cambiandolo, gli altri dispositivi vengono scollegati e dovranno inserire il nuovo PIN: utile se perdi il telefono." : "Imposta un PIN di 6 cifre: ti servirà per collegare un nuovo telefono, l'iPad o un altro computer, senza link.") + "</p>");
+  p.push("<div class='riga2'><div class='campo'><label for='n-pin'>" + (S.dati.haPin ? "Nuovo PIN" : "PIN") + "</label><input type='password' id='n-pin' class='campo-pin' inputmode='numeric' pattern='[0-9]*' maxlength='6' autocomplete='new-password'></div>");
+  p.push("<div class='campo'><label for='n-pin2'>Ripeti il PIN</label><input type='password' id='n-pin2' class='campo-pin' inputmode='numeric' pattern='[0-9]*' maxlength='6' autocomplete='new-password'></div></div>");
+  p.push("<button type='button' class='btn btn-primario' onclick='salvaPin()'>" + (S.dati.haPin ? "Cambia il PIN" : "Imposta il PIN") + "</button>");
+  caps.push(["pin", "PIN di accesso", S.dati.haPin ? "Impostato" : "Da impostare", p.join(""), !S.dati.haPin]);
+
+  /* Logo */
+  var l = [];
+  l.push("<img class='logo-anteprima nascosto' id='logoAnteprima' alt='Logo attuale'>");
+  l.push("<p class='aiuto' id='logoStato'>" + (S.dati.haLogo ? "Logo caricato." : "Nessun logo: nell'intestazione compare il nome dell'azienda.") + "</p>");
+  l.push("<div class='campo'><label for='logoFile'>Carica un PNG o JPG (massimo 2 MB, meglio con sfondo bianco o trasparente)</label><input type='file' id='logoFile' accept='image/png,image/jpeg' onchange='caricaLogo()'></div>");
+  caps.push(["logo", "Logo del rapportino", S.dati.haLogo ? "Caricato" : "Non caricato", l.join("")]);
+
+  /* Promemoria */
+  var m = [];
+  m.push("<p class='aiuto'>Crea nel calendario Lavoro Pre System un evento alle 8:00 del giorno 1 di ogni mese, con notifica su tutti i dispositivi e il collegamento al rapportino.</p>");
+  m.push("<button type='button' class='btn' onclick='creaPromemoria()'>" + (S.dati.haPromemoria ? "Ricrea il promemoria" : "Crea il promemoria") + "</button>");
+  caps.push(["promemoria", "Promemoria mensile", S.dati.haPromemoria ? "Attivo" : "Da creare", m.join("")]);
+
+  /* Questo dispositivo */
+  var cache = leggiCache();
+  var q = [];
+  q.push("<div class='dettagli'>");
+  q.push("<div><span>Ultimo aggiornamento</span><span>" + (cache && cache.salvato ? esc(dataBreve(isoDaData(new Date(cache.salvato))) + " " + pad2(new Date(cache.salvato).getHours()) + ":" + pad2(new Date(cache.salvato).getMinutes())) : "mai") + "</span></div>");
+  q.push("<div><span>Motore dati</span><span>" + esc("..." + MOTORE_URL.slice(-24)) + "</span></div>");
+  q.push("<div><span>Versione app</span><span>" + VERSIONE + "</span></div>");
+  q.push("</div>");
+  q.push("<p class='aiuto'>Per collegare un altro dispositivo basta il PIN. In alternativa puoi usare il link di collegamento: mandalo a te stesso solo in una nota protetta o con AirDrop, non per mail.</p>");
+  q.push("<button type='button' class='btn' onclick='copiaLinkCollegamento()'>Copia il link di collegamento</button>");
+  q.push("<button type='button' class='btn btn-pericolo' onclick='scollega()'>Scollega questo dispositivo</button>");
+  caps.push(["dispositivo", "Questo dispositivo", "Versione " + VERSIONE, q.join("")]);
+
+  var h = ["<h1 class='titolo-vista'>Impostazioni</h1><div class='capitoli'>"];
+  caps.forEach(function (cp) {
+    var aperto = S.capitolo === cp[0];
+    h.push("<section class='capitolo" + (aperto ? " aperto" : "") + "'>");
+    h.push("<button type='button' class='capitolo-titolo' aria-expanded='" + (aperto ? "true" : "false") + "' onclick='apriCapitolo(\"" + cp[0] + "\")'><span class='capitolo-testo'><span class='capitolo-nome'>" + esc(cp[1]) + "</span><span class='capitolo-stato" + (cp[4] ? " da-fare" : "") + "'>" + esc(cp[2]) + "</span></span><span class='capitolo-freccia' aria-hidden='true'>&#8250;</span></button>");
+    if (aperto) h.push("<div class='capitolo-corpo'>" + cp[3] + "</div>");
+    h.push("</section>");
   });
   h.push("</div>");
-
-  h.push("<div class='blocco'><h3>Logo del rapportino</h3>");
-  h.push("<img class='logo-anteprima nascosto' id='logoAnteprima' alt='Logo attuale'>");
-  h.push("<p class='aiuto' id='logoStato'>" + (S.dati.haLogo ? "Logo caricato." : "Nessun logo: nell'intestazione compare il nome dell'azienda.") + "</p>");
-  h.push("<div class='campo'><label for='logoFile'>Carica un PNG o JPG (massimo 2 MB, meglio con sfondo bianco o trasparente)</label><input type='file' id='logoFile' accept='image/png,image/jpeg' onchange='caricaLogo()'></div></div>");
-
-  h.push("<div class='blocco'><h3>Promemoria mensile</h3>");
-  h.push("<p class='aiuto'>Crea nel calendario Lavoro Pre System un evento alle 8:00 del giorno 1 di ogni mese, con notifica su tutti i dispositivi e il collegamento al rapportino.</p>");
-  h.push("<button type='button' class='btn' onclick='creaPromemoria()'>" + (S.dati.haPromemoria ? "Ricrea il promemoria" : "Crea il promemoria") + "</button></div>");
-
-  var cache = leggiCache();
-  var cfg = leggiCfg() || {};
-  h.push("<div class='blocco'><h3>Questo dispositivo</h3>");
-  h.push("<div class='dettagli'>");
-  h.push("<div><span>Ultimo aggiornamento</span><span>" + (cache && cache.salvato ? esc(dataBreve(isoDaData(new Date(cache.salvato))) + " " + pad2(new Date(cache.salvato).getHours()) + ":" + pad2(new Date(cache.salvato).getMinutes())) : "mai") + "</span></div>");
-  h.push("<div><span>Motore dati</span><span>" + esc("..." + MOTORE_URL.slice(-24)) + "</span></div>");
-  h.push("<div><span>Versione app</span><span>" + VERSIONE + "</span></div>");
-  h.push("</div>");
-  h.push("<p class='aiuto'>Per collegare un altro dispositivo copia il link e mandalo a te stesso in una nota protetta o con AirDrop, non per mail. Chi ha il link può leggere i tuoi dati.</p>");
-  h.push("<button type='button' class='btn' onclick='copiaLinkCollegamento()'>Copia il link di collegamento</button>");
-  h.push("<button type='button' class='btn btn-pericolo' onclick='scollega()'>Scollega questo dispositivo</button></div>");
-
   el("v-impostazioni").innerHTML = h.join("");
-  if (S.dati.haLogo) {
+  if (S.capitolo === "logo" && S.dati.haLogo) {
     chiama("getLogoAnteprima", [], function (uri) { mostraLogo(uri); });
+  }
+}
+
+/* Apre un solo capitolo alla volta; toccando quello aperto si richiude */
+function apriCapitolo(id) {
+  S.capitolo = S.capitolo === id ? "" : id;
+  renderImpostazioni();
+  if (S.capitolo) {
+    var aperto = document.querySelector(".capitolo.aperto");
+    if (aperto && aperto.scrollIntoView) aperto.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 }
 
@@ -1268,8 +1345,7 @@ var DESCR_SEGNAPOSTO = {
 
 function bloccoTesti() {
   var imp = S.dati.impostazioni;
-  var h = "<div class='blocco'><h3>Testi delle richieste</h3>";
-  h += "<p class='aiuto'>Scrivi le mail come preferisci. Le parole tra parentesi graffe vengono sostituite con i dati della richiesta: tocca un segnaposto per inserirlo nel punto in cui stai scrivendo. Se svuoti un campo torna il testo predefinito.</p>";
+  var h = "<p class='aiuto'>Scrivi le mail come preferisci. Le parole tra parentesi graffe vengono sostituite con i dati della richiesta: tocca un segnaposto per inserirlo nel punto in cui stai scrivendo. Se svuoti un campo torna il testo predefinito.</p>";
   [["FERIE", "Ferie"], ["PERMESSO", "Permessi"]].forEach(function (t) {
     h += "<div style='margin-top:14px'><b>" + t[1] + "</b></div>";
     h += campoTesto("t-OGGETTO_" + t[0], "Oggetto", imp["OGGETTO_" + t[0]], "text");
@@ -1281,7 +1357,7 @@ function bloccoTesti() {
     h += "</div>";
     h += "<div class='azioni-riga' style='margin-bottom:6px'><button type='button' class='btn btn-piccolo' onclick='anteprimaTesto(\"" + t[0] + "\")'>Anteprima</button><button type='button' class='btn btn-piccolo btn-testo' onclick='ripristinaTesto(\"" + t[0] + "\")'>Ripristina il testo predefinito</button></div>";
   });
-  h += "<button type='button' class='btn btn-primario' style='margin-top:10px' onclick='salvaTesti()'>Salva i testi</button></div>";
+  h += "<button type='button' class='btn btn-primario' style='margin-top:10px' onclick='salvaTesti()'>Salva i testi</button>";
   return h;
 }
 
@@ -1351,6 +1427,20 @@ function salvaTesti() {
     S.dati.impostazioni = imp;
     salvaCache();
     avviso("Testi salvati: le prossime mail useranno questi testi");
+  });
+}
+
+function salvaPin() {
+  var a = valore("n-pin"), b = valore("n-pin2");
+  if (!/^[0-9]{6}$/.test(a)) { avviso("Il PIN deve essere di 6 cifre.", true); return; }
+  if (a !== b) { avviso("I due PIN non coincidono.", true); return; }
+  var cambio = S.dati.haPin;
+  chiama("salvaPin", [a], function (res) {
+    localStorage.setItem(CHIAVE_TOKEN, res.token);
+    S.dati.haPin = true;
+    salvaCache();
+    renderImpostazioni();
+    avviso(cambio ? "PIN cambiato: gli altri dispositivi dovranno inserire il nuovo PIN" : "PIN impostato");
   });
 }
 

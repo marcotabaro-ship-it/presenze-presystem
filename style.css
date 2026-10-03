@@ -278,3 +278,55 @@ body.scollegato .schede, body.scollegato .btn-testata { display: none; }
 .scelta-mese { border: 1px solid var(--linea); background: var(--superficie); border-radius: 10px; padding: 12px 4px; font-size: 15px; cursor: pointer; color: var(--inchiostro); }
 .scelta-mese.corrente { border-color: var(--accento); }
 .scelta-mese.attivo { background: var(--accento); color: #FFFFFF; border-color: var(--accento); font-weight: 600; }
+.campo input.campo-pin { font-size: 26px; letter-spacing: 10px; text-align: center; font-family: "Barlow Semi Condensed", Arial, sans-serif; }
+.altro-accesso { margin-top: 6px; }
+
+/* Titolo di vista e capitoli delle impostazioni */
+.titolo-vista { font-size: 30px; font-weight: 700; margin: 2px 0 14px 0; }
+.capitoli { display: flex; flex-direction: column; gap: 8px; }
+.capitolo { background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--raggio); overflow: hidden; }
+.capitolo-titolo { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; background: none; border: 0; cursor: pointer; text-align: left; color: var(--inchiostro); }
+.capitolo-testo { display: flex; flex-direction: column; min-width: 0; }
+.capitolo-nome { font-family: "Barlow Semi Condensed", Arial, sans-serif; font-weight: 600; font-size: 18px; }
+.capitolo-stato { font-size: 14px; color: var(--ardesia); }
+.capitolo-stato.da-fare { color: var(--attesa); font-weight: 600; }
+.capitolo-freccia { font-size: 26px; line-height: 1; color: var(--ardesia); transition: transform 0.15s; }
+.capitolo.aperto .capitolo-freccia { transform: rotate(90deg); }
+.capitolo.aperto .capitolo-titolo { border-bottom: 1px solid #EDF0F2; }
+.capitolo-corpo { padding: 14px 16px 16px 16px; }
+@media (prefers-reduced-motion: reduce) { .capitolo-freccia { transition: none; } }
+
+/* Menu laterale: solo su schermi larghi (PC, iPad in orizzontale) */
+.btn-menu { display: none; }
+.laterale { display: none; }
+@media (min-width: 1100px) {
+  body { padding-bottom: 24px; }
+  .testata { height: calc(64px + var(--safe-t)); padding-left: 12px; }
+  .schede { display: none; }
+  .btn-menu { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; background: transparent; border: 0; color: #FFFFFF; cursor: pointer; flex: none; }
+  .btn-menu svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .btn-menu:hover { background: #2B3742; }
+  .laterale {
+    display: flex; flex-direction: column; gap: 2px;
+    position: fixed; left: 0; bottom: 0; top: calc(64px + var(--safe-t)); width: 220px; z-index: 15;
+    background: var(--superficie); border-right: 1px solid var(--linea); padding: 14px 10px;
+    transition: width 0.15s;
+  }
+  .menu-voce { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 8px; background: none; cursor: pointer; color: var(--ardesia); font-size: 15.5px; font-weight: 500; text-align: left; white-space: nowrap; overflow: hidden; }
+  .menu-voce svg { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .menu-voce:hover { background: #F1F3F4; color: var(--inchiostro); }
+  .menu-voce.attiva { background: var(--accento-chiaro); color: var(--accento); font-weight: 600; }
+  .menu-separatore { height: 1px; background: var(--linea); margin: 8px 6px; }
+  .contenuto { margin-left: 220px; max-width: none; padding: 22px 32px 32px 32px; transition: margin-left 0.15s; }
+  .contenuto > .vista { max-width: 860px; margin: 0 auto; }
+  body.menu-compatto .laterale { width: 64px; }
+  body.menu-compatto .menu-voce span { display: none; }
+  body.menu-compatto .menu-voce { justify-content: center; padding: 10px 0; }
+  body.menu-compatto .contenuto { margin-left: 64px; }
+  body.scollegato .laterale, body.scollegato .btn-menu { display: none; }
+  body.scollegato .contenuto { margin-left: 0; }
+  .avviso { bottom: 24px; }
+}
+@media (min-width: 1100px) and (prefers-reduced-motion: reduce) {
+  .laterale, .contenuto { transition: none; }
+}
