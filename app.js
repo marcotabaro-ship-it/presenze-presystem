@@ -18,8 +18,10 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "1.0.0";
-var CHIAVE_CFG = "pps.cfg";
+var VERSIONE = "1.1.0";
+var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
+var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
+var CHIAVE_TOKEN = "pps.token";
 var CHIAVE_DATI = "pps.dati";
 var PDF_CORRENTE = null;
 
@@ -89,21 +91,41 @@ function infoGiorno(iso, chius) {
   var weekend = dow === 0 || dow === 6;
   var fest = festivita(anno)[iso] || "";
   var ch = (chius || chiusureMappa())[iso] || "";
-  return { iso: iso, dow: dow, weekend: weekend, festivo: fest, chiusura: ch, lavorativo: !weekend && !fest && !ch };
+  /* la chiusura aziendale resta un giorno lavorativo ma vale come ferie collettive */
+  return { iso: iso, dow: dow, weekend: weekend, festivo: fest, chiusura: ch, lavorativo: !weekend && !fest, utile: !weekend && !fest && !ch };
 }
 
-function lavorativiTra(dal, al) {
+function contaGiorni(dal, al, criterio) {
   var ch = chiusureMappa();
   var n = 0, g = dal, i = 0;
-  while (g <= al && i < 400) { if (infoGiorno(g, ch).lavorativo) n++; g = piuGiorni(g, 1); i++; }
+  while (g <= al && i < 400) { var x = infoGiorno(g, ch); if (criterio(x)) n++; g = piuGiorni(g, 1); i++; }
   return n;
 }
+
+function lavorativiTra(dal, al) { return contaGiorni(dal, al, function (x) { return x.lavorativo; }); }
+function utiliTra(dal, al) { return contaGiorni(dal, al, function (x) { return x.utile; }); }
+function chiusuraTra(dal, al) { return contaGiorni(dal, al, function (x) { return x.lavorativo && !!x.chiusura; }); }
 
 function prossimoLavorativo(iso) {
   var ch = chiusureMappa();
   var g = piuGiorni(iso, 1);
-  for (var i = 0; i < 40; i++) { if (infoGiorno(g, ch).lavorativo) return g; g = piuGiorni(g, 1); }
+  for (var i = 0; i < 60; i++) { if (infoGiorno(g, ch).utile) return g; g = piuGiorni(g, 1); }
   return g;
+}
+
+/* Periodi di chiusura raggruppati per ID: [{id, dal, al, descrizione}] */
+function periodiChiusura() {
+  var m = {};
+  (S.dati.chiusure || []).forEach(function (c) {
+    if (!m[c.id]) m[c.id] = { id: c.id, dal: c.data, al: c.data, descrizione: c.descrizione };
+    if (c.data < m[c.id].dal) m[c.id].dal = c.data;
+    if (c.data > m[c.id].al) m[c.id].al = c.data;
+  });
+  return Object.keys(m).map(function (k) { return m[k]; }).sort(function (a, b) { return a.dal < b.dal ? -1 : 1; });
+}
+
+function periodoChiusuraDi(iso) {
+  return periodiChiusura().filter(function (p) { return p.dal <= iso && p.al >= iso; })[0] || null;
 }
 
 function minuti(hhmm) { var p = String(hhmm).split(":"); return Number(p[0]) * 60 + Number(p[1]); }
@@ -189,7 +211,23 @@ function frasiDestinatari(uso) {
    CHIAMATE AL SERVER, AVVISI, FOGLIO A COMPARSA
    --------------------------------------------------------- */
 function leggiCfg() {
-  try { var c = JSON.parse(localStorage.getItem(CHIAVE_CFG) || "null"); return (c && c.url && c.token) ? c : null; } catch (e) { return null; }
+  var t = "";
+  try { t = localStorage.getItem(CHIAVE_TOKEN) || ""; } catch (e) { t = ""; }
+  return t ? { url: MOTORE_URL, token: t } : null;
+}
+
+/* Estrae il codice di accesso da un link di collegamento (#k=...) o dal codice nudo */
+function estraiToken(testo) {
+  var t = String(testo || "").trim();
+  var m = t.match(/[#&?]k=([a-f0-9]{64})/i);
+  if (m) return m[1].toLowerCase();
+  m = t.match(/^[a-f0-9]{64}$/i);
+  return m ? t.toLowerCase() : "";
+}
+
+function linkCollegamento() {
+  var cfg = leggiCfg();
+  return cfg ? APP_URL + "#k=" + cfg.token : "";
 }
 
 function salvaCache() {
@@ -297,6 +335,11 @@ function avvio() {
   }
   window.addEventListener("online", function () { sincronizza(false); });
   window.addEventListener("offline", function () { aggiornaStatoSync(null, true); });
+  var dalLink = estraiToken(location.hash);
+  if (dalLink) {
+    if (history.replaceState) history.replaceState(null, "", location.pathname + location.search);
+    if (!leggiCfg() || leggiCfg().token !== dalLink) { provaCollegamento(dalLink); return; }
+  }
   if (!leggiCfg()) { mostraCollega(); return; }
   var cache = leggiCache();
   if (cache && cache.dati) {
@@ -356,7 +399,7 @@ function inizializzaVista() {
 }
 
 function applicaVistaIniziale(v) {
-  var tipi = { ferie: "FERIE", permesso: "PERMESSO", malattia: "MALATTIA", presenza: "PRESENZA" };
+  var tipi = { ferie: "FERIE", permesso: "PERMESSO", malattia: "MALATTIA", presenza: "PRESENZA", chiusura: "CHIUSURA" };
   if (tipi[v]) { S.tipo = tipi[v]; vai("nuova"); return; }
   if (["richieste", "rapportino", "impostazioni"].indexOf(v) >= 0) { vai(v); return; }
   vai("home");
@@ -383,28 +426,39 @@ function vai(vista, mantieniScroll) {
    --------------------------------------------------------- */
 function mostraCollega() {
   document.body.classList.add("scollegato");
-  var cfg = leggiCfg() || {};
   var h = "<div class='collega'><h1>Collega questo dispositivo</h1>";
-  h += "<p class='aiuto'>Serve una volta sola per ogni dispositivo. I due valori li trovi nel registro di esecuzione della funzione mostraCodiceAccesso in Apps Script e nella finestra di deployment.</p>";
+  h += "<p class='aiuto'>Si fa una volta sola per dispositivo: poi l'app si apre direttamente dall'icona. Il modo più veloce è aprire il link di collegamento che hai salvato nelle note.</p>";
   h += "<div class='blocco'>";
-  h += "<div class='campo'><label for='k-url'>Indirizzo del motore dati (termina con /exec)</label><input type='url' id='k-url' autocomplete='off' autocapitalize='off' spellcheck='false' value='" + esc(cfg.url || "") + "'></div>";
-  h += "<div class='campo'><label for='k-token'>Codice di accesso</label><input type='text' id='k-token' autocomplete='off' autocapitalize='off' spellcheck='false' value=''></div>";
-  h += "<button type='button' class='btn btn-primario' onclick='collega()'>Collega</button>";
+  h += "<button type='button' class='btn btn-primario' onclick='incollaDagliAppunti()'>Incolla il link copiato</button>";
+  h += "<div class='campo' style='margin-top:10px'><label for='k-token'>Oppure incolla qui il link o il codice di accesso</label><input type='text' id='k-token' autocomplete='off' autocapitalize='off' spellcheck='false'></div>";
+  h += "<button type='button' class='btn' onclick='collega()'>Collega</button>";
   h += "</div><div class='versione'>Presenze Pre System, versione " + VERSIONE + "</div></div>";
   el("v-collega").innerHTML = h;
   vai("collega");
 }
 
+function incollaDagliAppunti() {
+  if (!navigator.clipboard || !navigator.clipboard.readText) { avviso("Incolla il link nel campo qui sotto e premi Collega.", true); return; }
+  navigator.clipboard.readText().then(function (testo) {
+    var t = estraiToken(testo);
+    if (!t) { avviso("Negli appunti non c'è un link di collegamento valido.", true); return; }
+    provaCollegamento(t);
+  }).catch(function () { avviso("Incolla il link nel campo qui sotto e premi Collega.", true); });
+}
+
 function collega() {
-  var url = valore("k-url").replace(/\s/g, "");
-  var token = valore("k-token").replace(/\s/g, "");
-  if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) { avviso("L'indirizzo deve essere quello della web app e terminare con /exec.", true); return; }
-  if (token.length < 30) { avviso("Il codice di accesso sembra incompleto.", true); return; }
-  var cfg = { url: url, token: token };
+  var t = estraiToken(valore("k-token"));
+  if (!t) { avviso("Link o codice non valido: il codice è di 64 caratteri.", true); return; }
+  provaCollegamento(t);
+}
+
+function provaCollegamento(token) {
+  var cfg = { url: MOTORE_URL, token: token };
   el("attesa").classList.remove("nascosto");
+  el("statoSync").textContent = "Collegamento in corso";
   api("getDatiIniziali", [], cfg).then(function (d) {
     el("attesa").classList.add("nascosto");
-    localStorage.setItem(CHIAVE_CFG, JSON.stringify(cfg));
+    localStorage.setItem(CHIAVE_TOKEN, token);
     S.dati = d;
     S.dati.oggi = oggiLocale();
     salvaCache();
@@ -412,8 +466,14 @@ function collega() {
     avviso("Dispositivo collegato");
   }).catch(function (err) {
     el("attesa").classList.add("nascosto");
+    if (!el("v-collega").innerHTML) mostraCollega();
     avviso(messaggioErrore(err), true);
   });
+}
+
+function copiaLinkCollegamento() {
+  var l = linkCollegamento();
+  if (l) copia(l);
 }
 
 function scollega() {
@@ -424,7 +484,7 @@ function scollega() {
 }
 
 function confermaScollega() {
-  localStorage.removeItem(CHIAVE_CFG);
+  localStorage.removeItem(CHIAVE_TOKEN);
   localStorage.removeItem(CHIAVE_DATI);
   S.dati = null;
   chiudiFoglio();
@@ -471,6 +531,8 @@ function renderHome() {
     var evs = attivi.filter(function (e) { return e.dal <= iso && e.al >= iso; });
     if (info.lavorativo) {
       conta.lav++;
+      var interaG = evs.some(function (e) { return e.tipo === "FERIE" || e.tipo === "MALATTIA" || (e.tipo === "PERMESSO" && e.intera) || e.tipo === "PRESENZA"; });
+      if (info.chiusura && !interaG) conta.ferie++;
       evs.forEach(function (e) {
         if (e.tipo === "FERIE") conta.ferie++;
         if (e.tipo === "MALATTIA") conta.mal++;
@@ -479,19 +541,20 @@ function renderHome() {
     }
     var cls = "cal-g";
     if (!info.lavorativo) cls += " cal-nl";
-    if (info.festivo || info.chiusura) cls += " cal-fest-g";
+    if (info.festivo) cls += " cal-fest-g";
     if (iso === oggi) cls += " cal-oggi";
     var et = "";
     evs.forEach(function (e) {
       if (!info.lavorativo && e.tipo !== "PRESENZA") return;
       et += "<span class='cal-ev ev-" + classeEvento(e) + "'>" + esc(etichettaBreve(e)) + "</span>";
     });
-    if (!et && (info.festivo || info.chiusura)) et = "<span class='cal-fest'>" + esc(info.festivo || info.chiusura) + "</span>";
+    if (!et && info.festivo) et = "<span class='cal-fest'>" + esc(info.festivo) + "</span>";
+    else if (!et && info.chiusura && info.lavorativo) et = "<span class='cal-ev ev-chiusura'>Ferie coll.</span>";
     h.push("<button type='button' class='" + cls + "' onclick='apriGiorno(\"" + iso + "\")' aria-label='" + esc(dataEstesa(iso)) + "'><span class='cal-n'>" + g + "</span>" + et + "</button>");
   }
   h.push("</div>");
 
-  h.push("<div class='legenda'><span><i style='background:#2E7D52'></i>Approvata</span><span><i style='background:#B07A08'></i>In attesa</span><span><i style='background:#B03A3A'></i>Malattia</span><span><i style='background:#2F5FB0'></i>Lavoro festivo</span><span><i class='l-nl'></i>Non lavorativo</span></div>");
+  h.push("<div class='legenda'><span><i style='background:#2E7D52'></i>Approvata</span><span><i style='background:#B07A08'></i>In attesa</span><span><i style='background:#B03A3A'></i>Malattia</span><span><i style='background:#2F5FB0'></i>Lavoro festivo</span><span><i style='background:#8C959D'></i>Chiusura aziendale</span><span><i class='l-nl'></i>Non lavorativo</span></div>");
 
   h.push("<div class='numeri'>");
   h.push("<div class='numero'><b>" + conta.lav + "</b><span>giorni lavorativi</span></div>");
@@ -517,16 +580,23 @@ function voceEvento(e) {
 function apriGiorno(iso) {
   var info = infoGiorno(iso);
   var evs = (S.dati.eventi || []).filter(function (e) { return e.dal <= iso && e.al >= iso && STATI_CHIUSI.indexOf(e.stato) < 0; });
-  var nota = info.festivo ? info.festivo : (info.chiusura ? "Chiusura aziendale: " + info.chiusura : (info.weekend ? "Giorno non lavorativo" : "Giorno lavorativo"));
+  var pc = info.chiusura ? periodoChiusuraDi(iso) : null;
+  var nota = info.festivo ? info.festivo : (info.weekend ? "Giorno non lavorativo" : (info.chiusura ? "Chiusura aziendale: " + info.chiusura + ". Vale come ferie collettive." : "Giorno lavorativo"));
   var h = "<h2>" + esc(maiusc(dataEstesa(iso))) + "</h2><div class='sottotitolo'>" + esc(nota) + "</div>";
   if (evs.length) h += "<div class='lista' style='margin-bottom:14px'>" + evs.map(voceEvento).join("") + "</div>";
-  if (info.lavorativo) {
+  var lavorato = evs.some(function (e) { return e.tipo === "PRESENZA"; });
+  if (info.utile) {
     h += "<button type='button' class='btn btn-primario' onclick='nuovaDa(\"FERIE\",\"" + iso + "\")'>Richiedi ferie</button>";
     h += "<button type='button' class='btn' onclick='nuovaDa(\"PERMESSO\",\"" + iso + "\")'>Richiedi un permesso</button>";
     h += "<button type='button' class='btn' onclick='nuovaDa(\"MALATTIA\",\"" + iso + "\")'>Comunica malattia</button>";
-  } else if (!evs.some(function (e) { return e.tipo === "PRESENZA"; })) {
+    h += "<button type='button' class='btn' onclick='nuovaDa(\"CHIUSURA\",\"" + iso + "\")'>Inserisci una chiusura aziendale</button>";
+  } else if (info.chiusura && info.lavorativo) {
+    if (!lavorato) h += "<button type='button' class='btn btn-primario' onclick='nuovaDa(\"PRESENZA\",\"" + iso + "\")'>Segna che ho lavorato</button>";
+    h += "<button type='button' class='btn' onclick='nuovaDa(\"MALATTIA\",\"" + iso + "\")'>Comunica malattia</button>";
+  } else if (!lavorato) {
     h += "<button type='button' class='btn btn-primario' onclick='nuovaDa(\"PRESENZA\",\"" + iso + "\")'>Segna che ho lavorato</button>";
   }
+  if (pc) h += "<button type='button' class='btn btn-pericolo' onclick='confermaEliminaChiusura(\"" + pc.id + "\")'>Elimina la chiusura dal " + dataBreve(pc.dal) + " al " + dataBreve(pc.al) + "</button>";
   h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Chiudi</button>";
   apriFoglio(h);
 }
@@ -550,7 +620,7 @@ function renderNuova() {
   var imp = S.dati.impostazioni;
   var oggi = S.dati.oggi;
   var dal = (S.precompila && S.precompila.dal) ? S.precompila.dal : oggi;
-  var tipi = [["FERIE", "Ferie"], ["PERMESSO", "Permesso"], ["MALATTIA", "Malattia"], ["PRESENZA", "Weekend o festivo"]];
+  var tipi = [["FERIE", "Ferie"], ["PERMESSO", "Permesso"], ["MALATTIA", "Malattia"], ["CHIUSURA", "Chiusura aziendale"], ["PRESENZA", "Lavoro festivo"]];
   var h = [];
   h.push("<div class='segmenti' role='tablist'>");
   tipi.forEach(function (t) {
@@ -585,16 +655,25 @@ function renderNuova() {
     h.push("<div class='campo'><label for='f-protocollo'>Numero di protocollo del certificato (facoltativo)</label><input type='text' id='f-protocollo' autocapitalize='characters' autocomplete='off'></div>");
   }
 
+  if (S.tipo === "CHIUSURA") {
+    h.push("<h3>Chiusura aziendale</h3>");
+    h.push("<p class='aiuto'>Periodo di chiusura per ferie comune a tutti i dipendenti. Non parte nessuna mail: ogni giorno lavorativo del periodo vale come giorno di ferie (ferie collettive). Sabati, domeniche e festività restano tali.</p>");
+    h.push("<div class='riga2'><div class='campo'><label for='f-dal'>Dal</label><input type='date' id='f-dal' value='" + dal + "' oninput='sincronizzaAl()'></div>");
+    h.push("<div class='campo'><label for='f-al'>Al</label><input type='date' id='f-al' value='" + dal + "' oninput='aggiornaAnteprima()'></div></div>");
+    h.push("<div class='campo'><label for='f-descr'>Descrizione</label><input type='text' id='f-descr' placeholder='Es. Chiusura estiva, Chiusura natalizia'></div>");
+  }
+
   if (S.tipo === "PRESENZA") {
     h.push("<h3>Lavoro in un giorno non lavorativo</h3>");
-    h.push("<p class='aiuto'>Sabato, domenica, festività o chiusura aziendale in cui hai lavorato. Viene conteggiato come presenza nel rapportino. Non parte nessuna mail.</p>");
+    h.push("<p class='aiuto'>Sabato, domenica, festività o giorno di chiusura aziendale in cui hai lavorato. Viene conteggiato come presenza nel rapportino. Non parte nessuna mail.</p>");
     h.push("<div class='campo'><label for='f-dal'>Giorno</label><input type='date' id='f-dal' value='" + dal + "' oninput='aggiornaAnteprima()'></div>");
   }
 
-  h.push("<div class='campo'><label for='f-note'>Note (facoltative)</label><textarea id='f-note' placeholder='" + (S.tipo === "PRESENZA" ? "Es. fiera, sopralluogo in cantiere" : "Compaiono nel testo della mail") + "'></textarea></div>");
+  if (S.tipo !== "CHIUSURA") h.push("<div class='campo'><label for='f-note'>Note (facoltative)</label><textarea id='f-note' placeholder='" + (S.tipo === "PRESENZA" ? "Es. fiera, sopralluogo in cantiere" : "Compaiono nel testo della mail") + "'></textarea></div>");
   h.push("<div class='anteprima' id='anteprima'></div>");
-  if (S.tipo !== "PRESENZA") h.push("<div class='nota-dest'>" + esc(frasiDestinatari("RICHIESTE")) + "</div>");
-  h.push("<button type='button' class='btn btn-primario' id='btnSalva' onclick='salvaNuova()'>" + (S.tipo === "PRESENZA" ? "Registra la presenza" : "Registra e prepara la mail") + "</button>");
+  if (S.tipo !== "PRESENZA" && S.tipo !== "CHIUSURA") h.push("<div class='nota-dest'>" + esc(frasiDestinatari("RICHIESTE")) + "</div>");
+  var etichettaBtn = S.tipo === "PRESENZA" ? "Registra la presenza" : (S.tipo === "CHIUSURA" ? "Registra la chiusura" : "Registra e prepara la mail");
+  h.push("<button type='button' class='btn btn-primario' id='btnSalva' onclick='salvaNuova()'>" + etichettaBtn + "</button>");
   h.push("</div>");
   el("v-nuova").innerHTML = h.join("");
   if (S.tipo === "PERMESSO") aggiornaCampiPermesso();
@@ -623,22 +702,33 @@ function aggiornaAnteprima() {
   if (!box) return;
   var testo = "", errore = false;
   var dal = valore("f-dal"), al = valore("f-al") || dal;
-  if (S.tipo === "FERIE" || S.tipo === "MALATTIA" || (S.tipo === "PERMESSO" && el("f-intera").checked)) {
+  var intera = S.tipo === "PERMESSO" && el("f-intera") && el("f-intera").checked;
+  if (S.tipo === "FERIE" || S.tipo === "MALATTIA" || S.tipo === "CHIUSURA" || intera) {
     if (!dal) { testo = "Scegli la data di inizio."; errore = true; }
     else if (al < dal) { testo = "La data finale è precedente a quella iniziale."; errore = true; }
-    else {
-      var n = lavorativiTra(dal, al);
-      if (!n && S.tipo !== "MALATTIA") { testo = "Nel periodo scelto non ci sono giorni lavorativi."; errore = true; }
+    else if (S.tipo === "CHIUSURA") {
+      var nl = lavorativiTra(dal, al);
+      testo = nl ? nl + (nl === 1 ? " giorno lavorativo" : " giorni lavorativi") + " di ferie collettive, " + formatoOre(nl * oreGiornata()) + " di ferie." : "Nel periodo non ci sono giorni lavorativi.";
+      errore = !nl;
+    } else if (S.tipo === "MALATTIA") {
+      var nm = lavorativiTra(dal, al);
+      testo = nm + (nm === 1 ? " giorno lavorativo." : " giorni lavorativi.");
+    } else {
+      var n = utiliTra(dal, al), nc = chiusuraTra(dal, al);
+      if (!n) { testo = nc ? "I giorni scelti sono già coperti dalla chiusura aziendale (ferie collettive)." : "Nel periodo scelto non ci sono giorni lavorativi."; errore = true; }
       else {
         testo = n + (n === 1 ? " giorno lavorativo" : " giorni lavorativi");
+        if (nc) testo += " (esclusi " + nc + " di chiusura aziendale)";
         if (S.tipo === "FERIE") testo += ". Rientro previsto " + dataEstesa(prossimoLavorativo(al)) + ".";
         else testo += ".";
       }
     }
   } else if (S.tipo === "PERMESSO") {
     var giorno = valore("f-giorno"), dalle = valore("f-dalle"), alle = valore("f-alle");
+    var ig = giorno ? infoGiorno(giorno) : null;
     if (!giorno || !dalle || !alle) { testo = "Indica giorno e orario."; errore = true; }
-    else if (!infoGiorno(giorno).lavorativo) { testo = "Il giorno scelto non è lavorativo."; errore = true; }
+    else if (!ig.lavorativo) { testo = "Il giorno scelto non è lavorativo."; errore = true; }
+    else if (ig.chiusura) { testo = "Il giorno scelto è di chiusura aziendale: vale già come ferie."; errore = true; }
     else if (minuti(alle) <= minuti(dalle)) { testo = "L'ora di fine deve essere successiva all'ora di inizio."; errore = true; }
     else {
       var ore = orePermesso(dalle, alle);
@@ -647,7 +737,7 @@ function aggiornaAnteprima() {
     }
   } else if (S.tipo === "PRESENZA") {
     if (!dal) { testo = "Scegli il giorno."; errore = true; }
-    else if (infoGiorno(dal).lavorativo) { testo = "Il giorno scelto è già lavorativo: la presenza è conteggiata in automatico."; errore = true; }
+    else if (infoGiorno(dal).utile) { testo = "Il giorno scelto è già lavorativo: la presenza è conteggiata in automatico."; errore = true; }
     else testo = maiusc(dataEstesa(dal)) + " verrà conteggiato come giorno di presenza.";
   }
   box.textContent = testo;
@@ -655,6 +745,17 @@ function aggiornaAnteprima() {
 }
 
 function salvaNuova() {
+  if (S.tipo === "CHIUSURA") {
+    var c = { dal: valore("f-dal"), al: valore("f-al") || valore("f-dal"), descrizione: valore("f-descr") };
+    chiama("aggiungiChiusura", [c], function (lista) {
+      S.dati.chiusure = lista;
+      S.precompila = null;
+      salvaCache();
+      avviso("Chiusura registrata come ferie collettive");
+      renderNuova();
+    });
+    return;
+  }
   var p = { tipo: S.tipo, note: valore("f-note") };
   if (S.tipo === "FERIE" || S.tipo === "MALATTIA") { p.dal = valore("f-dal"); p.al = valore("f-al"); }
   if (S.tipo === "MALATTIA") p.protocollo = valore("f-protocollo");
@@ -950,20 +1051,14 @@ function renderImpostazioni() {
   h.push("<button type='button' class='btn btn-primario' onclick='salvaImpostazioni()'>Salva i dati</button></div>");
 
   h.push("<div class='blocco'><h3>Chiusure aziendali</h3>");
-  h.push("<p class='aiuto'>Festività nazionali, Pasquetta e San Francesco sono già incluse. Aggiungi qui ponti, chiusure estive o natalizie e il santo patrono, se l'azienda chiude.</p>");
-  h.push("<div class='riga2'>" + campoTesto("c-dal", "Dal", "", "date") + campoTesto("c-al", "Al", "", "date") + "</div>");
-  h.push(campoTesto("c-descr", "Descrizione", "", "text"));
-  h.push("<button type='button' class='btn' onclick='aggiungiChiusura()'>Aggiungi la chiusura</button>");
-  var oggi = S.dati.oggi;
-  var annoFa = piuGiorni(oggi, -365);
-  var chius = (S.dati.chiusure || []).filter(function (c) { return c.data >= annoFa; });
-  if (chius.length) {
-    h.push("<div style='margin-top:8px'>");
-    chius.forEach(function (c) {
-      h.push("<div class='dest'><div class='dest-corpo'><div class='dest-nome'>" + esc(maiusc(dataEstesa(c.data))) + "</div><div class='dest-mail'>" + esc(c.descrizione) + "</div></div><button type='button' class='btn btn-piccolo btn-pericolo' onclick='eliminaChiusura(\"" + c.id + "\")'>Elimina</button></div>");
-    });
-    h.push("</div>");
-  }
+  h.push("<p class='aiuto'>Le inserisci dalla sezione Nuova, scegliendo Chiusura aziendale. Ogni giorno lavorativo del periodo vale come ferie collettive. Le festività nazionali, Pasquetta e San Francesco sono già incluse.</p>");
+  var annoFa = piuGiorni(S.dati.oggi, -365);
+  var periodi = periodiChiusura().filter(function (p) { return p.al >= annoFa; });
+  if (!periodi.length) h.push("<div class='vuoto'>Nessuna chiusura registrata.</div>");
+  periodi.forEach(function (p) {
+    var nl = lavorativiTra(p.dal, p.al);
+    h.push("<div class='dest'><div class='dest-corpo'><div class='dest-nome'>" + esc(p.descrizione) + "</div><div class='dest-mail'>Dal " + esc(dataBreve(p.dal)) + " al " + esc(dataBreve(p.al)) + ", " + nl + (nl === 1 ? " giorno" : " giorni") + " di ferie collettive</div></div><button type='button' class='btn btn-piccolo btn-pericolo' onclick='confermaEliminaChiusura(\"" + p.id + "\")'>Elimina</button></div>");
+  });
   h.push("</div>");
 
   h.push("<div class='blocco'><h3>Logo del rapportino</h3>");
@@ -980,9 +1075,11 @@ function renderImpostazioni() {
   h.push("<div class='blocco'><h3>Questo dispositivo</h3>");
   h.push("<div class='dettagli'>");
   h.push("<div><span>Ultimo aggiornamento</span><span>" + (cache && cache.salvato ? esc(dataBreve(isoDaData(new Date(cache.salvato))) + " " + pad2(new Date(cache.salvato).getHours()) + ":" + pad2(new Date(cache.salvato).getMinutes())) : "mai") + "</span></div>");
-  h.push("<div><span>Motore dati</span><span>" + esc(cfg.url ? "..." + cfg.url.slice(-24) : "") + "</span></div>");
+  h.push("<div><span>Motore dati</span><span>" + esc("..." + MOTORE_URL.slice(-24)) + "</span></div>");
   h.push("<div><span>Versione app</span><span>" + VERSIONE + "</span></div>");
   h.push("</div>");
+  h.push("<p class='aiuto'>Per collegare un altro dispositivo copia il link e mandalo a te stesso in una nota protetta o con AirDrop, non per mail. Chi ha il link può leggere i tuoi dati.</p>");
+  h.push("<button type='button' class='btn' onclick='copiaLinkCollegamento()'>Copia il link di collegamento</button>");
   h.push("<button type='button' class='btn btn-pericolo' onclick='scollega()'>Scollega questo dispositivo</button></div>");
 
   el("v-impostazioni").innerHTML = h.join("");
@@ -1044,22 +1141,21 @@ function salvaImpostazioni() {
   });
 }
 
-function aggiungiChiusura() {
-  var d = { dal: valore("c-dal"), al: valore("c-al") || valore("c-dal"), descrizione: valore("c-descr") };
-  chiama("aggiungiChiusura", [d], function (lista) {
-    S.dati.chiusure = lista;
-    S.festCache = {};
-    salvaCache();
-    renderImpostazioni();
-    avviso("Chiusura aggiunta");
-  });
+function confermaEliminaChiusura(id) {
+  var p = periodiChiusura().filter(function (x) { return x.id === id; })[0];
+  if (!p) return;
+  var h = "<h2>Eliminare la chiusura?</h2><div class='sottotitolo'>" + esc(p.descrizione) + " dal " + esc(dataBreve(p.dal)) + " al " + esc(dataBreve(p.al)) + ". I giorni tornano lavorativi con presenza automatica ed esce dal calendario.</div>";
+  h += "<button type='button' class='btn btn-pericolo' onclick='eliminaChiusura(\"" + id + "\")'>Elimina</button>";
+  h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Annulla</button>";
+  apriFoglio(h);
 }
 
 function eliminaChiusura(id) {
   chiama("eliminaChiusura", [id], function (lista) {
     S.dati.chiusure = lista;
     salvaCache();
-    renderImpostazioni();
+    chiudiFoglio();
+    vai(S.vista, true);
     avviso("Chiusura eliminata");
   });
 }

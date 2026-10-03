@@ -1,6 +1,6 @@
 /* Presenze Pre System - service worker
    Cambia CACHE a ogni nuova versione pubblicata */
-var CACHE = "pps-1.0.0";
+var CACHE = "pps-1.1.0";
 var FILES = [
   "./",
   "./index.html",
@@ -14,7 +14,9 @@ var FILES = [
 ];
 
 self.addEventListener("install", function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
+  e.waitUntil(caches.open(CACHE).then(function (c) {
+    return c.addAll(FILES.map(function (f) { return new Request(f, { cache: "reload" }); }));
+  }).then(function () { return self.skipWaiting(); }));
 });
 
 self.addEventListener("activate", function (e) {
@@ -23,20 +25,24 @@ self.addEventListener("activate", function (e) {
   }).then(function () { return self.clients.claim(); }));
 });
 
-/* File dell'app: risposta immediata dalla cache e aggiornamento in sottofondo.
-   Motore dati (Apps Script) e font: sempre dalla rete. */
+/* File dell'app: sempre la versione più recente dalla rete, copia in cache per l'uso offline.
+   Motore dati (Apps Script) e font: solo rete, mai in cache. */
 self.addEventListener("fetch", function (e) {
   var req = e.request;
   if (req.method !== "GET") return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  e.respondWith(caches.open(CACHE).then(function (c) {
-    return c.match(req, { ignoreSearch: true }).then(function (inCache) {
-      var rete = fetch(req).then(function (r) {
-        if (r && r.ok) c.put(req, r.clone());
-        return r;
-      }).catch(function () { return inCache; });
-      return inCache || rete;
-    });
-  }));
+  e.respondWith(
+    fetch(req, { cache: "no-cache" }).then(function (r) {
+      if (r && r.ok) {
+        var copia = r.clone();
+        caches.open(CACHE).then(function (c) { c.put(req, copia); });
+      }
+      return r;
+    }).catch(function () {
+      return caches.open(CACHE).then(function (c) {
+        return c.match(req, { ignoreSearch: true }).then(function (m) { return m || c.match("./"); });
+      });
+    })
+  );
 });

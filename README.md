@@ -14,6 +14,6 @@ preparare le mail in Outlook e generare il rapportino mensile delle presenze.
 Il codice Apps Script NON va in questo repository pubblico: contiene indirizzi email dei colleghi.
 
 ## Nuova versione
-1. Modifica i file e aumenta VERSIONE in app.js e CACHE in sw.js con lo stesso numero.
+1. Modifica i file e aumenta VERSIONE in app.js, CACHE in sw.js e ?v= in index.html con lo stesso numero.
 2. Commit su main: GitHub Pages pubblica in circa un minuto.
-3. Sui dispositivi l'app si aggiorna alla seconda apertura.
+3. Sui dispositivi la nuova versione arriva alla prima apertura con rete.
