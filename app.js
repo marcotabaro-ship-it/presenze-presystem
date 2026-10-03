@@ -11,14 +11,14 @@ var S = {
   calMese: 0,
   tipo: "FERIE",
   precompila: null,
-  filtro: "gestire",
+  filtro: "prossime",
   rapportinoMese: "",
   esitoRapportino: null,
   mailCorrente: null,
   festCache: {}
 };
 
-var VERSIONE = "1.1.0";
+var VERSIONE = "1.2.0";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -27,8 +27,8 @@ var PDF_CORRENTE = null;
 
 var GIORNI = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
 var MESI = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
-var NOMI_STATO = { "IN ATTESA": "In attesa", "APPROVATA": "Approvata", "RESPINTA": "Respinta", "ANNULLATA": "Annullata", "COMUNICATA": "Comunicata", "REGISTRATA": "Registrata" };
-var STATI_CHIUSI = ["ANNULLATA", "RESPINTA"];
+var NOMI_STATO = { "IN ATTESA": "Approvata", "APPROVATA": "Approvata", "RESPINTA": "Respinta", "ANNULLATA": "Annullata", "COMUNICATA": "Comunicata", "REGISTRATA": "Registrata", "REVOCATA": "Revocata", "MODIFICATA": "Modificata" };
+var STATI_CHIUSI = ["ANNULLATA", "RESPINTA", "REVOCATA", "MODIFICATA"];
 
 /* ---------------------------------------------------------
    UTILITA
@@ -160,7 +160,6 @@ function classeEvento(e) {
   if (STATI_CHIUSI.indexOf(e.stato) >= 0) return "chiusa";
   if (e.tipo === "MALATTIA") return "malattia";
   if (e.tipo === "PRESENZA") return "extra";
-  if (e.stato === "IN ATTESA") return "attesa";
   return "ok";
 }
 
@@ -554,7 +553,7 @@ function renderHome() {
   }
   h.push("</div>");
 
-  h.push("<div class='legenda'><span><i style='background:#2E7D52'></i>Approvata</span><span><i style='background:#B07A08'></i>In attesa</span><span><i style='background:#B03A3A'></i>Malattia</span><span><i style='background:#2F5FB0'></i>Lavoro festivo</span><span><i style='background:#8C959D'></i>Chiusura aziendale</span><span><i class='l-nl'></i>Non lavorativo</span></div>");
+  h.push("<div class='legenda'><span><i style='background:#2E7D52'></i>Ferie e permessi</span><span><i style='background:#B03A3A'></i>Malattia</span><span><i style='background:#2F5FB0'></i>Lavoro festivo</span><span><i style='background:#8C959D'></i>Chiusura aziendale</span><span><i class='l-nl'></i>Non lavorativo</span></div>");
 
   h.push("<div class='numeri'>");
   h.push("<div class='numero'><b>" + conta.lav + "</b><span>giorni lavorativi</span></div>");
@@ -811,17 +810,17 @@ function scegliFiltro(f) {
 function renderRichieste() {
   var oggi = S.dati.oggi;
   var tutti = (S.dati.eventi || []).slice().sort(function (a, b) { return a.dal < b.dal ? 1 : (a.dal > b.dal ? -1 : (a.creato < b.creato ? 1 : -1)); });
-  var daGestire = tutti.filter(function (e) { return e.stato === "IN ATTESA"; });
+  var variate = tutti.filter(function (e) { return STATI_CHIUSI.indexOf(e.stato) >= 0; });
   var lista;
-  if (S.filtro === "gestire") lista = daGestire;
-  else if (S.filtro === "prossime") lista = tutti.filter(function (e) { return e.al >= oggi && STATI_CHIUSI.indexOf(e.stato) < 0; }).reverse();
+  if (S.filtro === "prossime") lista = tutti.filter(function (e) { return e.al >= oggi && STATI_CHIUSI.indexOf(e.stato) < 0; }).reverse();
+  else if (S.filtro === "variazioni") lista = variate;
   else lista = tutti;
-  var filtri = [["gestire", "In attesa (" + daGestire.length + ")"], ["prossime", "In programma"], ["tutte", "Tutte"]];
+  var filtri = [["prossime", "In programma"], ["variazioni", "Variazioni (" + variate.length + ")"], ["tutte", "Tutte"]];
   var h = ["<div class='filtri'>"];
   filtri.forEach(function (f) { h.push("<button type='button' class='filtro" + (S.filtro === f[0] ? " attivo" : "") + "' onclick='scegliFiltro(\"" + f[0] + "\")'>" + f[1] + "</button>"); });
   h.push("</div>");
   if (!lista.length) {
-    var vuoti = { gestire: "Nessuna richiesta in attesa di risposta.", prossime: "Niente in programma.", tutte: "Non hai ancora registrato nulla. Parti dalla sezione Nuova." };
+    var vuoti = { prossime: "Niente in programma.", variazioni: "Nessuna revoca, modifica o annullamento.", tutte: "Non hai ancora registrato nulla. Parti dalla sezione Nuova." };
     h.push("<div class='vuoto'>" + vuoti[S.filtro] + "</div>");
   } else {
     h.push("<div class='lista'>" + lista.map(voceEvento).join("") + "</div>");
@@ -829,9 +828,14 @@ function renderRichieste() {
   el("v-richieste").innerHTML = h.join("");
 }
 
+function eventoDaId(id) {
+  return (S.dati.eventi || []).filter(function (x) { return x.id === id; })[0] || null;
+}
+
 function apriEvento(id) {
-  var e = (S.dati.eventi || []).filter(function (x) { return x.id === id; })[0];
+  var e = eventoDaId(id);
   if (!e) return;
+  var chiuso = STATI_CHIUSI.indexOf(e.stato) >= 0;
   var h = "<h2>" + esc(titoloEvento(e)) + "</h2><div class='sottotitolo'>" + esc(periodoEvento(e)) + "</div>";
   h += "<div class='dettagli'>";
   h += "<div><span>Stato</span><span>" + esc(NOMI_STATO[e.stato] || e.stato) + "</span></div>";
@@ -839,51 +843,104 @@ function apriEvento(id) {
   if (e.protocollo) h += "<div><span>Protocollo certificato</span><span>" + esc(e.protocollo) + "</span></div>";
   if (e.note) h += "<div><span>Note</span><span>" + esc(e.note) + "</span></div>";
   h += "<div><span>Registrata il</span><span>" + esc(dataBreve(e.creato) + " " + e.creato.substr(11, 5)) + "</span></div>";
-  if (e.aggiornato && e.aggiornato !== e.creato) h += "<div><span>Ultima modifica</span><span>" + esc(dataBreve(e.aggiornato) + " " + e.aggiornato.substr(11, 5)) + "</span></div>";
+  if (chiuso) {
+    if (e.dataVariazione) h += "<div><span>Data variazione</span><span>" + esc(dataBreve(e.dataVariazione)) + "</span></div>";
+    if (e.origine) h += "<div><span>Decisa da</span><span>" + (e.origine === "AZIENDA" ? "Azienda" : "Dipendente") + "</span></div>";
+    if (e.motivo) h += "<div><span>Motivo</span><span>" + esc(e.motivo) + "</span></div>";
+  }
+  var prec = e.sostituisce ? eventoDaId(e.sostituisce) : null;
+  if (prec) h += "<div><span>Sostituisce</span><span>" + esc(periodoEvento(prec)) + "</span></div>";
   h += "</div>";
   var b = function (testo, azione, classe) { return "<button type='button' class='btn " + (classe || "") + "' onclick='" + azione + "'>" + testo + "</button>"; };
-  if (e.stato === "IN ATTESA") {
-    h += b("Segna come approvata", "cambiaStato(\"" + id + "\",\"APPROVATA\")", "btn-primario");
-    h += b("Segna come respinta", "confermaStato(\"" + id + "\",\"RESPINTA\")");
-    h += b("Annulla la richiesta", "confermaStato(\"" + id + "\",\"ANNULLATA\")", "btn-pericolo");
-    h += b("Prepara di nuovo la mail", "riapriMail(\"" + id + "\")");
-  } else if (e.stato === "APPROVATA") {
-    h += b("Annulla la richiesta", "confermaStato(\"" + id + "\",\"ANNULLATA\")", "btn-pericolo");
-    h += b("Prepara di nuovo la mail", "riapriMail(\"" + id + "\")");
-  } else if (e.stato === "COMUNICATA") {
-    h += b("Annulla la comunicazione", "confermaStato(\"" + id + "\",\"ANNULLATA\")", "btn-pericolo");
-    h += b("Prepara di nuovo la mail", "riapriMail(\"" + id + "\")");
-  } else if (e.stato === "REGISTRATA") {
-    h += b("Elimina questa presenza", "confermaStato(\"" + id + "\",\"ANNULLATA\")", "btn-pericolo");
+  if (!chiuso) {
+    if (e.tipo !== "PRESENZA") h += b("Modifica date o orari", "apriModifica(\"" + id + "\")", "btn-primario");
+    if (e.tipo === "FERIE" || e.tipo === "PERMESSO") h += b("Revocata dall'azienda", "apriRevoca(\"" + id + "\")");
+    h += b(e.tipo === "PRESENZA" ? "Elimina questa presenza" : "Annulla (decisione mia)", "apriAnnulla(\"" + id + "\")", "btn-pericolo");
+    if (e.tipo !== "PRESENZA") h += b("Prepara di nuovo la mail", "riapriMail(\"" + id + "\")");
+  } else {
+    if (e.sostituitaDa && eventoDaId(e.sostituitaDa)) h += b("Apri la registrazione aggiornata", "apriEvento(\"" + e.sostituitaDa + "\")", "btn-primario");
+    if (e.stato === "ANNULLATA" && e.tipo !== "PRESENZA") h += b("Prepara di nuovo la mail di annullamento", "riapriMail(\"" + id + "\")");
   }
   h += b("Chiudi", "chiudiFoglio()", "btn-testo");
   apriFoglio(h);
 }
 
-function confermaStato(id, stato) {
-  var e = (S.dati.eventi || []).filter(function (x) { return x.id === id; })[0];
-  var testi = {
-    "RESPINTA": ["Segnare come respinta?", "La registrazione esce dal calendario e dal rapportino. Non si potrà più modificare."],
-    "ANNULLATA": ["Annullare?", e && e.tipo === "PRESENZA" ? "La presenza esce dal calendario e dal rapportino." : "Esce dal calendario e dal rapportino. Dopo potrai inviare la mail di annullamento."]
-  };
-  var t = testi[stato];
-  var h = "<h2>" + esc(t[0]) + "</h2><div class='sottotitolo'>" + esc(t[1]) + "</div>";
-  h += "<button type='button' class='btn btn-pericolo' onclick='cambiaStato(\"" + id + "\",\"" + stato + "\")'>Conferma</button>";
+function apriModifica(id) {
+  var e = eventoDaId(id);
+  if (!e) return;
+  var h = "<h2>Modifica " + esc(titoloEvento(e).toLowerCase()) + "</h2><div class='sottotitolo'>Attuale: " + esc(periodoEvento(e)) + ". La registrazione attuale resta come traccia.</div>";
+  if (e.tipo === "PERMESSO" && !e.intera) {
+    h += campoTesto("m-giorno", "Giorno", e.dal, "date");
+    h += "<div class='riga2'>" + campoTesto("m-dalle", "Dalle", e.dalle, "time") + campoTesto("m-alle", "Alle", e.alle, "time") + "</div>";
+  } else {
+    h += "<div class='riga2'>" + campoTesto("m-dal", "Dal", e.dal, "date") + campoTesto("m-al", "Al", e.al, "date") + "</div>";
+  }
+  if (e.tipo === "MALATTIA") h += campoTesto("m-protocollo", "Numero di protocollo del certificato", e.protocollo, "text");
+  h += "<div class='campo'><label for='m-origine'>Chi ha deciso la modifica</label><select id='m-origine'><option value='DIPENDENTE'>Io, preparo la mail di modifica</option><option value='AZIENDA'>L'azienda (revoca parziale o spostamento), nessuna mail</option></select></div>";
+  h += "<div class='campo'><label for='m-motivo'>Motivo (obbligatorio se decide l'azienda)</label><input type='text' id='m-motivo' placeholder='Es. urgenza in cantiere'></div>";
+  h += "<button type='button' class='btn btn-primario' onclick='salvaModifica(\"" + id + "\")'>Salva la modifica</button>";
   h += "<button type='button' class='btn btn-testo' onclick='apriEvento(\"" + id + "\")'>Torna indietro</button>";
   apriFoglio(h);
 }
 
-function cambiaStato(id, stato) {
-  chiama("aggiornaStato", [id, stato], function (res) {
+function salvaModifica(id) {
+  var e = eventoDaId(id);
+  var nuovi = {};
+  if (e.tipo === "PERMESSO" && !e.intera) { nuovi.dal = valore("m-giorno"); nuovi.al = nuovi.dal; nuovi.dalle = valore("m-dalle"); nuovi.alle = valore("m-alle"); }
+  else { nuovi.dal = valore("m-dal"); nuovi.al = valore("m-al") || nuovi.dal; }
+  if (e.tipo === "MALATTIA") nuovi.protocollo = valore("m-protocollo");
+  var info = { origine: valore("m-origine"), motivo: valore("m-motivo") };
+  if (info.origine === "AZIENDA" && !info.motivo) { avviso("Indica il motivo della modifica decisa dall'azienda.", true); return; }
+  chiama("modificaEvento", [id, nuovi, info], function (res) {
     S.dati.eventi = res.eventi;
     salvaCache();
     vai(S.vista, true);
-    if (res.mail) {
-      mostraMail(res.mail, "Annullata", "Ora apri la mail di annullamento in Outlook e inviala.");
-    } else {
-      chiudiFoglio();
-      avviso("Stato aggiornato: " + (NOMI_STATO[stato] || stato).toLowerCase());
-    }
+    if (res.mail) mostraMail(res.mail, "Modifica registrata", "Calendario aggiornato. Ora apri la mail di modifica in Outlook e inviala.");
+    else { chiudiFoglio(); avviso("Modifica registrata e tracciata"); }
+  });
+}
+
+function apriRevoca(id) {
+  var e = eventoDaId(id);
+  if (!e) return;
+  var h = "<h2>Revoca da parte dell'azienda</h2><div class='sottotitolo'>" + esc(titoloEvento(e) + ", " + periodoEvento(e)) + ". I giorni tornano di presenza; la revoca compare nel rapportino. Nessuna mail.</div>";
+  h += campoTesto("r-data", "Data della revoca", S.dati.oggi, "date");
+  h += "<div class='campo'><label for='r-motivo'>Motivo</label><input type='text' id='r-motivo' placeholder='Es. consegna urgente in cantiere'></div>";
+  h += "<button type='button' class='btn btn-pericolo' onclick='salvaRevoca(\"" + id + "\")'>Registra la revoca</button>";
+  h += "<button type='button' class='btn btn-testo' onclick='apriEvento(\"" + id + "\")'>Torna indietro</button>";
+  apriFoglio(h);
+}
+
+function salvaRevoca(id) {
+  var info = { data: valore("r-data"), motivo: valore("r-motivo") };
+  if (!info.motivo) { avviso("Indica il motivo della revoca.", true); return; }
+  chiama("revocaEvento", [id, info], function (res) {
+    S.dati.eventi = res.eventi;
+    salvaCache();
+    vai(S.vista, true);
+    chiudiFoglio();
+    avviso("Revoca registrata e tracciata");
+  });
+}
+
+function apriAnnulla(id) {
+  var e = eventoDaId(id);
+  if (!e) return;
+  var presenza = e.tipo === "PRESENZA";
+  var h = "<h2>" + (presenza ? "Eliminare la presenza?" : "Annullare?") + "</h2><div class='sottotitolo'>" + esc(titoloEvento(e) + ", " + periodoEvento(e)) + ". " + (presenza ? "Esce dal calendario e dal rapportino; resta come traccia." : "Esce dal calendario; resta come traccia e compare tra le variazioni del rapportino. Dopo prepari la mail di annullamento.") + "</div>";
+  h += "<div class='campo'><label for='a-motivo'>Motivo (facoltativo)</label><input type='text' id='a-motivo'></div>";
+  h += "<button type='button' class='btn btn-pericolo' onclick='salvaAnnulla(\"" + id + "\")'>Conferma</button>";
+  h += "<button type='button' class='btn btn-testo' onclick='apriEvento(\"" + id + "\")'>Torna indietro</button>";
+  apriFoglio(h);
+}
+
+function salvaAnnulla(id) {
+  chiama("annullaEvento", [id, { motivo: valore("a-motivo") }], function (res) {
+    S.dati.eventi = res.eventi;
+    salvaCache();
+    vai(S.vista, true);
+    if (res.mail) mostraMail(res.mail, "Annullata", "Ora apri la mail di annullamento in Outlook e inviala.");
+    else { chiudiFoglio(); avviso("Presenza eliminata"); }
   });
 }
 
@@ -908,8 +965,6 @@ function renderRapportino() {
   h.push("<div class='blocco'><h3>Rapportino mensile</h3>");
   h.push("<p class='aiuto'>Il giorno 1 di ogni mese alle 6:00 il PDF del mese precedente viene creato da solo su Drive. Qui puoi rigenerarlo dopo eventuali modifiche e preparare la mail.</p>");
   h.push("<div class='campo'><label for='r-mese'>Mese</label><select id='r-mese' onchange='cambiaMeseRapportino()'>" + opz.join("") + "</select></div>");
-  var pend = inAttesaNelMese(S.rapportinoMese);
-  if (pend) h.push("<div class='avvertenza'>" + (pend === 1 ? "C'è 1 richiesta ancora in attesa" : "Ci sono " + pend + " richieste ancora in attesa") + " in questo mese: nel PDF compare un asterisco. Se nel frattempo è stata approvata, aggiornala prima dalla sezione Richieste.</div>");
   h.push("<div class='nota-dest'>" + esc(frasiDestinatari("RAPPORTINO")) + "</div>");
   h.push("<button type='button' class='btn btn-primario' onclick='generaRapportino()'>Genera il rapportino</button></div>");
 
@@ -927,6 +982,7 @@ function renderRapportino() {
     h.push("<div><span>Ferie</span><span>" + fer(t) + " / " + fer(ta) + "</span></div>");
     h.push("<div><span>Permessi</span><span>" + formatoOre(t.permessiOre) + " / " + formatoOre(ta.permessiOre) + "</span></div>");
     h.push("<div><span>Malattia</span><span>" + gg(t.malattia) + " / " + gg(ta.malattia) + "</span></div>");
+    h.push("<div><span>Variazioni del mese</span><span>" + ((r.variazioni && r.variazioni.length) ? r.variazioni.length : "nessuna") + "</span></div>");
     h.push("</div>");
     h.push("<ol class='passi'><li>Apri la mail in Outlook: destinatari, oggetto e testo sono già pronti.</li><li>Torna qui e tocca Condividi il PDF, poi scegli Salva su File.</li><li>In Outlook tocca la graffetta, allega il PDF da File e invia.</li></ol>");
     h.push("<a class='btn btn-primario' href='" + esc(r.mail.mailto) + "'>Apri la mail in Outlook</a>");
@@ -949,12 +1005,6 @@ function renderRapportino() {
   el("v-rapportino").innerHTML = h.join("");
 }
 
-function inAttesaNelMese(cod) {
-  var p = cod.split("-");
-  var primo = cod + "-01";
-  var ultimo = cod + "-" + pad2(new Date(Number(p[0]), Number(p[1]), 0).getDate());
-  return (S.dati.eventi || []).filter(function (e) { return e.stato === "IN ATTESA" && e.dal <= ultimo && e.al >= primo; }).length;
-}
 
 function blobPdf(base64) {
   var bin = atob(base64);
