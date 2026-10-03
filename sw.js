@@ -1,6 +1,6 @@
 /* Presenze Pre System - service worker
    Cambia CACHE a ogni nuova versione pubblicata */
-var CACHE = "pps-1.2.0";
+var CACHE = "pps-1.5.0";
 var FILES = [
   "./",
   "./index.html",

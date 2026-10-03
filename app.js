@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "1.2.0";
+var VERSIONE = "1.5.0";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -164,10 +164,9 @@ function classeEvento(e) {
 }
 
 function nomePermesso(e) {
-  if (e.sottotipo === "Altro") return "Permesso " + e.descrizione;
-  if (e.sottotipo === "ROL") return "Permesso ROL";
-  if (e.sottotipo === "Ex festività") return "Permesso ex festività";
-  return e.sottotipo;
+  if (e.sottotipo === "Altro" && e.descrizione) return "Permesso " + e.descrizione;
+  if (e.sottotipo && e.sottotipo !== "ROL" && e.sottotipo !== "Altro") return e.sottotipo;
+  return "Permesso";
 }
 
 function titoloEvento(e) {
@@ -181,7 +180,7 @@ function etichettaBreve(e) {
   if (e.tipo === "FERIE") return "Ferie";
   if (e.tipo === "MALATTIA") return "Malattia";
   if (e.tipo === "PRESENZA") return "Lavoro";
-  var base = e.sottotipo === "ROL" ? "ROL" : "Perm.";
+  var base = "Perm.";
   return e.intera ? base : base + " " + formatoOre(e.ore);
 }
 
@@ -507,49 +506,97 @@ function meseCorrente() {
   renderHome();
 }
 
+/* Numero della settimana secondo ISO 8601 (la settimana inizia il lunedì) */
+function settimanaIso(d) {
+  var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  var g = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - g);
+  var inizioAnno = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t - inizioAnno) / 86400000 + 1) / 7);
+}
+
+function apriSceltaMese(anno) {
+  var y = anno || S.calAnno;
+  var oggi = dataDaIso(S.dati.oggi);
+  var h = "<div class='scelta-anno'><button type='button' class='btn-nav' onclick='apriSceltaMese(" + (y - 1) + ")' aria-label='Anno precedente'>&lsaquo;</button><h2>" + y + "</h2><button type='button' class='btn-nav' onclick='apriSceltaMese(" + (y + 1) + ")' aria-label='Anno successivo'>&rsaquo;</button></div>";
+  h += "<div class='scelta-mesi'>";
+  MESI.forEach(function (nome, i) {
+    var cls = "scelta-mese";
+    if (y === S.calAnno && i + 1 === S.calMese) cls += " attivo";
+    if (y === oggi.getFullYear() && i === oggi.getMonth()) cls += " corrente";
+    h += "<button type='button' class='" + cls + "' onclick='vaiAMese(" + y + "," + (i + 1) + ")'>" + maiusc(nome) + "</button>";
+  });
+  h += "</div>";
+  h += "<button type='button' class='btn' onclick='vaiAMese(" + oggi.getFullYear() + "," + (oggi.getMonth() + 1) + ")'>Torna a oggi</button>";
+  h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Chiudi</button>";
+  apriFoglio(h);
+}
+
+function vaiAMese(anno, mese) {
+  S.calAnno = anno;
+  S.calMese = mese;
+  chiudiFoglio();
+  renderHome();
+}
+
 function renderHome() {
   var a = S.calAnno, m = S.calMese, oggi = S.dati.oggi;
   var ch = chiusureMappa();
   var attivi = eventiAttivi();
   var h = [];
-  h.push("<div class='cal-testa'><h1 class='cal-titolo'>" + maiusc(MESI[m - 1]) + " " + a + "</h1>");
+  h.push("<div class='cal-testa'><button type='button' class='cal-titolo-btn' onclick='apriSceltaMese()' aria-label='Scegli mese e anno'><h1 class='cal-titolo'>" + maiusc(MESI[m - 1]) + " " + a + "</h1><span class='cal-freccia'>&#9662;</span></button>");
   h.push("<div class='cal-nav'><button type='button' class='btn-nav' onclick='spostaMese(-1)' aria-label='Mese precedente'>&lsaquo;</button>");
   h.push("<button type='button' class='btn-nav' onclick='meseCorrente()' aria-label='Mese corrente'>&bull;</button>");
   h.push("<button type='button' class='btn-nav' onclick='spostaMese(1)' aria-label='Mese successivo'>&rsaquo;</button></div></div>");
 
   h.push("<div class='cal-griglia'>");
+  h.push("<div class='cal-gs cal-gs-sett' title='Numero della settimana'>Sett.</div>");
   ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"].forEach(function (g) { h.push("<div class='cal-gs'>" + g + "</div>"); });
-  var offset = (dataDaIso(isoDa(a, m, 1)).getDay() + 6) % 7;
-  for (var i = 0; i < offset; i++) h.push("<div class='cal-vuoto'></div>");
+  var primoMese = isoDa(a, m, 1);
   var n = new Date(a, m, 0).getDate();
+  var ultimoMese = isoDa(a, m, n);
+  var offset = (dataDaIso(primoMese).getDay() + 6) % 7;
+  var inizioGriglia = piuGiorni(primoMese, -offset);
   var conta = { lav: 0, ferie: 0, perm: 0, mal: 0 };
   var oreG = oreGiornata();
-  for (var g = 1; g <= n; g++) {
-    var iso = isoDa(a, m, g);
-    var info = infoGiorno(iso, ch);
-    var evs = attivi.filter(function (e) { return e.dal <= iso && e.al >= iso; });
-    if (info.lavorativo) {
-      conta.lav++;
-      var interaG = evs.some(function (e) { return e.tipo === "FERIE" || e.tipo === "MALATTIA" || (e.tipo === "PERMESSO" && e.intera) || e.tipo === "PRESENZA"; });
-      if (info.chiusura && !interaG) conta.ferie++;
+  var iso = inizioGriglia;
+  var colonna = 0;
+  while (iso <= ultimoMese || colonna !== 0) {
+    if (colonna === 0) h.push("<div class='cal-sett'>" + settimanaIso(dataDaIso(iso)) + "</div>");
+    var g = Number(iso.substr(8, 2));
+    if (iso < primoMese || iso > ultimoMese) {
+      var dir = iso < primoMese ? -1 : 1;
+      var infoA = infoGiorno(iso, ch);
+      h.push("<button type='button' class='cal-g cal-altro" + (infoA.lavorativo ? "" : " cal-nl") + "' onclick='spostaMese(" + dir + ")' aria-label='" + (dir < 0 ? "Vai al mese precedente" : "Vai al mese successivo") + "'><span class='cal-n'>" + g + "</span></button>");
+    } else {
+      var info = infoGiorno(iso, ch);
+      var giornoIso = iso;
+      var evs = attivi.filter(function (e) { return e.dal <= giornoIso && e.al >= giornoIso; });
+      if (info.lavorativo) {
+        conta.lav++;
+        var interaG = evs.some(function (e) { return e.tipo === "FERIE" || e.tipo === "MALATTIA" || (e.tipo === "PERMESSO" && e.intera) || e.tipo === "PRESENZA"; });
+        if (info.chiusura && !interaG) conta.ferie++;
+        evs.forEach(function (e) {
+          if (e.tipo === "FERIE") conta.ferie++;
+          if (e.tipo === "MALATTIA") conta.mal++;
+          if (e.tipo === "PERMESSO") conta.perm += e.intera ? oreG : e.ore;
+        });
+      }
+      var cls = "cal-g";
+      if (!info.lavorativo) cls += " cal-nl";
+      if (info.festivo) cls += " cal-fest-g";
+      if (iso === oggi) cls += " cal-oggi";
+      var et = "";
       evs.forEach(function (e) {
-        if (e.tipo === "FERIE") conta.ferie++;
-        if (e.tipo === "MALATTIA") conta.mal++;
-        if (e.tipo === "PERMESSO") conta.perm += e.intera ? oreG : e.ore;
+        if (!info.lavorativo && e.tipo !== "PRESENZA") return;
+        et += "<span class='cal-ev ev-" + classeEvento(e) + "'>" + esc(etichettaBreve(e)) + "</span>";
       });
+      if (!et && info.festivo) et = "<span class='cal-fest'>" + esc(info.festivo) + "</span>";
+      else if (!et && info.chiusura && info.lavorativo) et = "<span class='cal-ev ev-chiusura'>Ferie coll.</span>";
+      h.push("<button type='button' class='" + cls + "' onclick='apriGiorno(\"" + iso + "\")' aria-label='" + esc(dataEstesa(iso)) + "'><span class='cal-n'>" + g + "</span>" + et + "</button>");
     }
-    var cls = "cal-g";
-    if (!info.lavorativo) cls += " cal-nl";
-    if (info.festivo) cls += " cal-fest-g";
-    if (iso === oggi) cls += " cal-oggi";
-    var et = "";
-    evs.forEach(function (e) {
-      if (!info.lavorativo && e.tipo !== "PRESENZA") return;
-      et += "<span class='cal-ev ev-" + classeEvento(e) + "'>" + esc(etichettaBreve(e)) + "</span>";
-    });
-    if (!et && info.festivo) et = "<span class='cal-fest'>" + esc(info.festivo) + "</span>";
-    else if (!et && info.chiusura && info.lavorativo) et = "<span class='cal-ev ev-chiusura'>Ferie coll.</span>";
-    h.push("<button type='button' class='" + cls + "' onclick='apriGiorno(\"" + iso + "\")' aria-label='" + esc(dataEstesa(iso)) + "'><span class='cal-n'>" + g + "</span>" + et + "</button>");
+    iso = piuGiorni(iso, 1);
+    colonna = (colonna + 1) % 7;
   }
   h.push("</div>");
 
@@ -635,10 +682,6 @@ function renderNuova() {
 
   if (S.tipo === "PERMESSO") {
     h.push("<h3>Richiesta di permesso</h3>");
-    h.push("<div class='campo'><label for='f-sottotipo'>Tipo di permesso</label><select id='f-sottotipo' onchange='aggiornaCampiPermesso()'>");
-    S.dati.sottotipiPermesso.forEach(function (s) { h.push("<option value='" + esc(s) + "'>" + esc(s) + "</option>"); });
-    h.push("</select></div>");
-    h.push("<div class='campo nascosto' id='c-descr'><label for='f-descr'>Descrizione</label><input type='text' id='f-descr' placeholder='Es. visita, pratica, assemblea'></div>");
     h.push("<label class='spunta'><input type='checkbox' id='f-intera' onchange='aggiornaCampiPermesso()'> Giornata intera</label>");
     h.push("<div id='c-orario'><div class='campo'><label for='f-giorno'>Giorno</label><input type='date' id='f-giorno' value='" + dal + "' oninput='aggiornaAnteprima()'></div>");
     h.push("<div class='riga2'><div class='campo'><label for='f-dalle'>Dalle</label><input type='time' id='f-dalle' step='900' value='" + esc(imp.POMERIGGIO_INIZIO) + "' oninput='aggiornaAnteprima()'></div>");
@@ -692,7 +735,6 @@ function aggiornaCampiPermesso() {
   var intera = el("f-intera").checked;
   el("c-orario").classList.toggle("nascosto", intera);
   el("c-giorni").classList.toggle("nascosto", !intera);
-  el("c-descr").classList.toggle("nascosto", valore("f-sottotipo") !== "Altro");
   aggiornaAnteprima();
 }
 
@@ -760,8 +802,8 @@ function salvaNuova() {
   if (S.tipo === "MALATTIA") p.protocollo = valore("f-protocollo");
   if (S.tipo === "PRESENZA") { p.dal = valore("f-dal"); p.al = p.dal; }
   if (S.tipo === "PERMESSO") {
-    p.sottotipo = valore("f-sottotipo");
-    p.descrizione = valore("f-descr");
+    p.sottotipo = "ROL";
+    p.descrizione = "";
     p.intera = el("f-intera").checked;
     if (p.intera) { p.dal = valore("f-dal"); p.al = valore("f-al"); }
     else { p.dal = valore("f-giorno"); p.al = p.dal; p.dalle = valore("f-dalle"); p.alle = valore("f-alle"); }
@@ -991,6 +1033,8 @@ function renderRapportino() {
     h.push("</div>");
   }
 
+  h.push(bloccoReportPeriodo());
+
   var arch = S.dati.rapportini || [];
   h.push("<div class='sezione-titolo'><h2>Archivio</h2></div>");
   if (!arch.length) h.push("<div class='vuoto'>Nessun rapportino generato finora.</div>");
@@ -1005,6 +1049,68 @@ function renderRapportino() {
   el("v-rapportino").innerHTML = h.join("");
 }
 
+
+/* ---------------------------------------------------------
+   REPORT PER PERIODO
+   --------------------------------------------------------- */
+function bloccoReportPeriodo() {
+  var oggi = S.dati.oggi;
+  if (!S.periodoDal) { S.periodoDal = oggi.substr(0, 4) + "-01-01"; S.periodoAl = oggi; }
+  var h = "<div class='blocco'><h3>Report per periodo</h3>";
+  h += "<p class='aiuto'>Scegli le date e ottieni i totali di ore di ferie e di permesso, con il dettaglio giorno per giorno.</p>";
+  h += "<div class='filtri'><button type='button' class='filtro' onclick='periodoRapido(\"mese\")'>Questo mese</button><button type='button' class='filtro' onclick='periodoRapido(\"scorso\")'>Mese scorso</button><button type='button' class='filtro' onclick='periodoRapido(\"anno\")'>Da inizio anno</button></div>";
+  h += "<div class='riga2'>" + campoTesto("p-dal", "Dal", S.periodoDal, "date") + campoTesto("p-al", "Al", S.periodoAl, "date") + "</div>";
+  h += "<button type='button' class='btn btn-primario' onclick='calcolaReportPeriodo()'>Calcola</button>";
+  var r = S.reportPeriodo;
+  if (r) {
+    var t = r.totali;
+    var gg = function (n) { return n + (n === 1 ? " giorno" : " giorni"); };
+    h += "<div class='sottotitolo' style='margin-top:14px'>Dal " + esc(dataBreve(r.dal)) + " al " + esc(dataBreve(r.al)) + "</div>";
+    h += "<div class='numeri'>";
+    h += "<div class='numero'><b>" + formatoOre(t.ferieOre) + "</b><span>di ferie, " + gg(t.ferieGiorni) + (t.ferieCollettive ? " (" + t.ferieCollettive + " di chiusura)" : "") + "</span></div>";
+    h += "<div class='numero'><b>" + formatoOre(t.permessiOre) + "</b><span>di permesso</span></div>";
+    h += "<div class='numero'><b>" + t.malattia + "</b><span>giorni di malattia</span></div>";
+    h += "<div class='numero'><b>" + t.presenze + "</b><span>giorni di presenza</span></div>";
+    h += "</div>";
+    if (r.dettaglio.length) {
+      h += "<div class='sezione-titolo'><h3>Dettaglio</h3></div><div class='dettagli'>";
+      r.dettaglio.forEach(function (d) {
+        h += "<div><span>" + esc(maiusc(d.giorno.substr(0, 3)) + " " + dataBreve(d.data)) + "</span><span>" + esc(d.testo) + (d.ore ? ", " + esc(formatoOre(d.ore)) : "") + "</span></div>";
+      });
+      h += "</div>";
+    } else {
+      h += "<div class='vuoto'>Nessuna ferie, permesso o malattia nel periodo.</div>";
+    }
+    if (r.variazioni.length) {
+      h += "<div class='sezione-titolo'><h3>Variazioni nel periodo</h3></div><div class='dettagli'>";
+      r.variazioni.forEach(function (v) { h += "<div><span>" + esc(v.data ? dataBreve(v.data) : "") + "</span><span>" + esc(v.testo) + "</span></div>"; });
+      h += "</div>";
+    }
+  }
+  h += "</div>";
+  return h;
+}
+
+function periodoRapido(tipo) {
+  var o = dataDaIso(S.dati.oggi);
+  if (tipo === "mese") { S.periodoDal = isoDa(o.getFullYear(), o.getMonth() + 1, 1); S.periodoAl = isoDa(o.getFullYear(), o.getMonth() + 1, new Date(o.getFullYear(), o.getMonth() + 1, 0).getDate()); }
+  if (tipo === "scorso") { var p = new Date(o.getFullYear(), o.getMonth() - 1, 1); S.periodoDal = isoDa(p.getFullYear(), p.getMonth() + 1, 1); S.periodoAl = isoDa(p.getFullYear(), p.getMonth() + 1, new Date(p.getFullYear(), p.getMonth() + 1, 0).getDate()); }
+  if (tipo === "anno") { S.periodoDal = o.getFullYear() + "-01-01"; S.periodoAl = S.dati.oggi; }
+  el("p-dal").value = S.periodoDal;
+  el("p-al").value = S.periodoAl;
+  calcolaReportPeriodo();
+}
+
+function calcolaReportPeriodo() {
+  S.periodoDal = valore("p-dal");
+  S.periodoAl = valore("p-al") || S.periodoDal;
+  if (!S.periodoDal) { avviso("Scegli la data di inizio.", true); return; }
+  chiama("reportPeriodo", [S.periodoDal, S.periodoAl], function (res) {
+    S.reportPeriodo = res;
+    renderRapportino();
+    avviso("Report calcolato");
+  });
+}
 
 function blobPdf(base64) {
   var bin = atob(base64);
@@ -1090,6 +1196,8 @@ function renderImpostazioni() {
   });
   h.push("<button type='button' class='btn' style='margin-top:12px' onclick='apriNuovoDestinatario()'>Aggiungi un indirizzo</button></div>");
 
+  h.push(bloccoTesti());
+
   h.push("<div class='blocco'><h3>Dati e orario di lavoro</h3>");
   h.push(campoTesto("i-NOME_DIPENDENTE", "Nome nelle mail", imp.NOME_DIPENDENTE, "text"));
   h.push(campoTesto("i-NOME_REPORT", "Nome nel rapportino", imp.NOME_REPORT, "text"));
@@ -1136,6 +1244,114 @@ function renderImpostazioni() {
   if (S.dati.haLogo) {
     chiama("getLogoAnteprima", [], function (uri) { mostraLogo(uri); });
   }
+}
+
+/* ---------------------------------------------------------
+   TESTI DELLE RICHIESTE
+   --------------------------------------------------------- */
+var DESCR_SEGNAPOSTO = {
+  saluto: "Buongiorno e nome dei destinatari in A",
+  nome: "il tuo nome",
+  firma: "la firma delle mail",
+  periodo: "periodo esteso, per esempio da lunedì 12/10/2026 a venerdì 16/10/2026",
+  periodo_breve: "periodo breve, per esempio dal 12/10/2026 al 16/10/2026",
+  dal: "primo giorno",
+  al: "ultimo giorno",
+  giorni: "giorni lavorativi, per esempio 5 giorni lavorativi",
+  rientro: "giorno di rientro",
+  note: "riga Note, se l'hai compilata",
+  data: "giorno del permesso",
+  dalle: "ora di inizio",
+  alle: "ora di fine",
+  durata: "ore o giorni del permesso"
+};
+
+function bloccoTesti() {
+  var imp = S.dati.impostazioni;
+  var h = "<div class='blocco'><h3>Testi delle richieste</h3>";
+  h += "<p class='aiuto'>Scrivi le mail come preferisci. Le parole tra parentesi graffe vengono sostituite con i dati della richiesta: tocca un segnaposto per inserirlo nel punto in cui stai scrivendo. Se svuoti un campo torna il testo predefinito.</p>";
+  [["FERIE", "Ferie"], ["PERMESSO", "Permessi"]].forEach(function (t) {
+    h += "<div style='margin-top:14px'><b>" + t[1] + "</b></div>";
+    h += campoTesto("t-OGGETTO_" + t[0], "Oggetto", imp["OGGETTO_" + t[0]], "text");
+    h += "<div class='campo'><label for='t-TESTO_" + t[0] + "'>Testo</label><textarea class='testo-mail' id='t-TESTO_" + t[0] + "' onfocus='S.ultimoTesto=this.id' onclick='S.ultimoTesto=this.id' onkeyup='S.ultimoTesto=this.id'>" + esc(imp["TESTO_" + t[0]]) + "</textarea></div>";
+    h += "<div class='segnaposto'>";
+    (S.dati.segnaposto[t[0]] || []).forEach(function (sp) {
+      h += "<button type='button' class='sp' title='" + esc(DESCR_SEGNAPOSTO[sp] || "") + "' onclick='inserisciSegnaposto(\"t-TESTO_" + t[0] + "\",\"" + sp + "\")'>{" + sp + "}</button>";
+    });
+    h += "</div>";
+    h += "<div class='azioni-riga' style='margin-bottom:6px'><button type='button' class='btn btn-piccolo' onclick='anteprimaTesto(\"" + t[0] + "\")'>Anteprima</button><button type='button' class='btn btn-piccolo btn-testo' onclick='ripristinaTesto(\"" + t[0] + "\")'>Ripristina il testo predefinito</button></div>";
+  });
+  h += "<button type='button' class='btn btn-primario' style='margin-top:10px' onclick='salvaTesti()'>Salva i testi</button></div>";
+  return h;
+}
+
+function inserisciSegnaposto(id, sp) {
+  var t = el(id);
+  if (!t) return;
+  var testo = "{" + sp + "}";
+  var ini = typeof t.selectionStart === "number" ? t.selectionStart : t.value.length;
+  var fin = typeof t.selectionEnd === "number" ? t.selectionEnd : t.value.length;
+  t.value = t.value.slice(0, ini) + testo + t.value.slice(fin);
+  t.focus();
+  try { t.setSelectionRange(ini + testo.length, ini + testo.length); } catch (e) { }
+}
+
+function ripristinaTesto(tipo) {
+  el("t-OGGETTO_" + tipo).value = S.dati.testiPredefiniti["OGGETTO_" + tipo];
+  el("t-TESTO_" + tipo).value = S.dati.testiPredefiniti["TESTO_" + tipo];
+  avviso("Testo predefinito ripristinato: premi Salva i testi per confermare");
+}
+
+function compilaModello(modello, valori) {
+  var t = String(modello).replace(/\{([a-z_]+)\}/g, function (m, k) { return valori[k] !== undefined ? String(valori[k]) : m; });
+  t = t.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+  return t.replace(/^\s+|\s+$/g, "");
+}
+
+function anteprimaTesto(tipo) {
+  var dA = destinatariAttivi("RICHIESTE");
+  var nomiA = dA.a.map(function (n) { return String(n).split(" ")[0]; });
+  var valori = {
+    saluto: "Buongiorno" + (nomiA.length ? " " + nomiA.join(" e ") : "") + ",",
+    nome: S.dati.impostazioni.NOME_DIPENDENTE,
+    firma: S.dati.impostazioni.FIRMA_MAIL || S.dati.impostazioni.NOME_DIPENDENTE,
+    note: "Note: esempio di nota"
+  };
+  if (tipo === "FERIE") {
+    valori.periodo = "da lunedì 12/10/2026 a venerdì 16/10/2026";
+    valori.periodo_breve = "dal 12/10/2026 al 16/10/2026";
+    valori.dal = "lunedì 12/10/2026";
+    valori.al = "venerdì 16/10/2026";
+    valori.giorni = "5 giorni lavorativi";
+    valori.rientro = "lunedì 19/10/2026";
+  } else {
+    valori.periodo = "il giorno giovedì 22/10/2026 dalle 14:00 alle 18:00";
+    valori.periodo_breve = "22/10/2026";
+    valori.data = "giovedì 22/10/2026";
+    valori.dalle = "14:00";
+    valori.alle = "18:00";
+    valori.durata = "4 h";
+  }
+  var ogg = compilaModello(valore("t-OGGETTO_" + tipo) || S.dati.testiPredefiniti["OGGETTO_" + tipo], valori).replace(/\s*\n\s*/g, " ");
+  var corpo = compilaModello(valore("t-TESTO_" + tipo) || S.dati.testiPredefiniti["TESTO_" + tipo], valori);
+  var h = "<h2>Anteprima " + (tipo === "FERIE" ? "richiesta ferie" : "richiesta permesso") + "</h2><div class='sottotitolo'>Con dati di esempio. Le modifiche non ancora salvate sono incluse.</div>";
+  h += "<div class='mail-campi'><div><b>Oggetto</b> " + esc(ogg) + "</div></div>";
+  h += "<pre class='mail-corpo'>" + esc(corpo) + "</pre>";
+  h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Chiudi</button>";
+  apriFoglio(h);
+}
+
+function salvaTesti() {
+  var d = {};
+  ["OGGETTO_FERIE", "TESTO_FERIE", "OGGETTO_PERMESSO", "TESTO_PERMESSO"].forEach(function (k) {
+    var x = el("t-" + k);
+    d[k] = x ? x.value : "";
+  });
+  chiama("salvaTesti", [d], function (imp) {
+    S.dati.impostazioni = imp;
+    salvaCache();
+    avviso("Testi salvati: le prossime mail useranno questi testi");
+  });
 }
 
 function campoTesto(id, etichetta, val, tipo) {
