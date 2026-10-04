@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "1.8.1";
+var VERSIONE = "1.8.2";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -676,14 +676,20 @@ function bloccoSaldoHome() {
   var h = "<div class='sezione-titolo'><h2>Ferie e permessi residui</h2><span class='voce-sub'>stima, la busta paga fa fede</span></div><div class='saldo-griglia'>";
   [["Ferie", sd.ferie], ["Permessi", sd.permessi]].forEach(function (x) {
     var v = x[1];
-    h += "<button type='button' class='saldo-carta' onclick='apriImpostazioniSaldo()'><span class='saldo-nome'>" + x[0] + "</span><b class='" + (v.residuoOggi < 0 ? "negativo" : "") + "'>" + formatoOreSegno(v.residuoOggi) + "</b><span class='saldo-sub'>residuo a oggi</span><span class='saldo-fine" + (v.residuoFineAnno < 0 ? " negativo" : "") + "'>A fine anno: " + formatoOreSegno(v.residuoFineAnno) + (v.programmato ? ", dopo " + formatoOre(v.programmato) + " già programmate" : "") + "</span></button>";
+    h += "<button type='button' class='saldo-carta' onclick='apriImpostazioniSaldo()'><span class='saldo-nome'>" + x[0] + "</span><b class='" + (v.residuoOggi < 0 ? "negativo" : "") + "'>" + formatoOreSegno(v.residuoOggi) + "</b><span class='saldo-sub'>residuo a oggi</span><span class='saldo-fine" + (v.residuoFineAnno < 0 ? " negativo" : "") + "'>A fine anno: " + formatoOreSegno(v.residuoFineAnno) + (v.programmato ? ", dopo " + oreDecimali(v.programmato) + " già programmate" : "") + "</span></button>";
   });
   h += "</div>";
   return h;
 }
 
+/* Ore in formato decimale come in busta paga: 5,33 h */
+function oreDecimali(ore) {
+  var n = Math.round(Number(ore || 0) * 100) / 100;
+  return (n < 0 ? "-" : "") + Math.abs(n).toFixed(2).replace(".", ",") + " h";
+}
+
 function formatoOreSegno(ore) {
-  return (ore < 0 ? "-" : "") + formatoOre(Math.abs(ore));
+  return oreDecimali(ore);
 }
 
 function apriImpostazioniSaldo() {
@@ -715,11 +721,11 @@ function corpoSaldo() {
     h += "<div class='dettagli' style='margin-top:12px'>";
     h += "<div><span><b>Ore</b></span><span><b>Ferie / Permessi</b></span></div>";
     h += "<div><span>Partenza (" + (sd.daBustaPaga ? "busta paga del " + esc(dataBreve(sd.base)) : "inizio rapporto") + ")</span><span>" + formatoOreSegno(sd.ferie.saldoIniziale) + " / " + formatoOreSegno(sd.permessi.saldoIniziale) + "</span></div>";
-    h += "<div><span>Maturate da allora</span><span>" + formatoOre(sd.ferie.maturato) + " / " + formatoOre(sd.permessi.maturato) + "</span></div>";
-    h += "<div><span>Godute fino a oggi</span><span>" + formatoOre(sd.ferie.goduto) + " / " + formatoOre(sd.permessi.goduto) + "</span></div>";
+    h += "<div><span>Maturate da allora</span><span>" + oreDecimali(sd.ferie.maturato) + " / " + oreDecimali(sd.permessi.maturato) + "</span></div>";
+    h += "<div><span>Godute fino a oggi</span><span>" + oreDecimali(sd.ferie.goduto) + " / " + oreDecimali(sd.permessi.goduto) + "</span></div>";
     h += "<div><span><b>Residuo a oggi</b></span><span><b>" + formatoOreSegno(sd.ferie.residuoOggi) + " / " + formatoOreSegno(sd.permessi.residuoOggi) + "</b></span></div>";
-    h += "<div><span>Già programmate fino al 31/12</span><span>" + formatoOre(sd.ferie.programmato) + " / " + formatoOre(sd.permessi.programmato) + "</span></div>";
-    h += "<div><span>Da maturare fino al 31/12</span><span>" + formatoOre(sd.ferie.daMaturare) + " / " + formatoOre(sd.permessi.daMaturare) + "</span></div>";
+    h += "<div><span>Già programmate fino al 31/12</span><span>" + oreDecimali(sd.ferie.programmato) + " / " + oreDecimali(sd.permessi.programmato) + "</span></div>";
+    h += "<div><span>Da maturare fino al 31/12</span><span>" + oreDecimali(sd.ferie.daMaturare) + " / " + oreDecimali(sd.permessi.daMaturare) + "</span></div>";
     h += "<div><span><b>Residuo stimato al 31/12</b></span><span><b>" + formatoOreSegno(sd.ferie.residuoFineAnno) + " / " + formatoOreSegno(sd.permessi.residuoFineAnno) + "</b></span></div>";
     h += "</div>";
   } else if (sd.motivo) {
