@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "2.0.0";
+var VERSIONE = "2.0.1";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -239,7 +239,41 @@ function leggiCache() {
 
 function oggiLocale() { return isoDaData(new Date()); }
 
+/* Le chiamate al motore dati partono una alla volta (coda), per non sovrapporle.
+   Google a volte risponde 404 anche se lo script ha lavorato correttamente:
+   le letture vengono ritentate da sole, le scritture no (si eviterebbero doppioni). */
+var CODA_API = Promise.resolve();
+var AZIONI_RIPETIBILI = ["getDatiIniziali", "getSaldo", "ecoDati", "getLogoAnteprima", "ecoScaricaDocumento", "scaricaRapportino", "mailEvento",
+  "reportPeriodo", "accediConPin", "sbloccaArea", "bloccaArea", "generaRapportino", "salvaImpostazioni", "salvaTesti", "salvaSaldo", "creaPromemoriaProva"];
+
 function api(azione, args, cfgProva) {
+  var p = CODA_API.then(function () { return apiConTentativi(azione, args, cfgProva, 0); });
+  CODA_API = p.catch(function () { });
+  return p;
+}
+
+function apiConTentativi(azione, args, cfgProva, tentativo) {
+  return apiDiretta(azione, args, cfgProva).catch(function (err) {
+    var transitorio = err && (err.stato === 404 || err.stato >= 500 || err.name === "TypeError");
+    if (transitorio && AZIONI_RIPETIBILI.indexOf(azione) >= 0 && tentativo < 2 && navigator.onLine) {
+      return new Promise(function (ok) { setTimeout(ok, 700 * (tentativo + 1)); }).then(function () {
+        return apiConTentativi(azione, args, cfgProva, tentativo + 1);
+      });
+    }
+    if (transitorio && AZIONI_RIPETIBILI.indexOf(azione) < 0 && navigator.onLine) {
+      var e = new Error("Google non ha confermato la risposta: l'operazione potrebbe essere stata registrata comunque. Aggiorno i dati, controlla prima di ripeterla.");
+      e.codice = "INCERTO";
+      setTimeout(function () {
+        sincronizza(false, true);
+        if (S.vista === "fascicolo" && S.sess && typeof caricaEco === "function") caricaEco();
+      }, 300);
+      throw e;
+    }
+    throw err;
+  });
+}
+
+function apiDiretta(azione, args, cfgProva) {
   var cfg = cfgProva || leggiCfg();
   if (!cfg && azione === "accediConPin") cfg = { url: MOTORE_URL, token: "" };
   if (!cfg) return Promise.reject(new Error("Dispositivo non collegato."));
@@ -252,7 +286,7 @@ function api(azione, args, cfgProva) {
     richiesta = fetch(cfg.url, { method: "POST", redirect: "follow", cache: "no-store", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: corpo });
   }
   return richiesta.then(function (r) {
-    if (!r.ok) throw new Error("Il motore dati ha risposto con errore " + r.status + ".");
+    if (!r.ok) { var e1 = new Error("Il motore dati ha risposto con errore " + r.status + "."); e1.stato = r.status; throw e1; }
     return r.json();
   }).then(function (res) {
     if (!res.ok) { var e = new Error(res.errore || "Errore sconosciuto."); e.codice = res.codice || ""; throw e; }
