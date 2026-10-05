@@ -1,6 +1,6 @@
 /* =========================================================
-   PRESENZE PRE SYSTEM - Marco Tabaro
-   File: app.js - PWA su GitHub Pages
+   LAVORO PRE SYSTEM - Marco Tabaro
+   File: app.js - PWA su GitHub Pages (presenze, richieste, rapportino, impostazioni)
    Motore dati: Apps Script (foglio, calendario, Drive)
    ========================================================= */
 
@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "1.8.2";
+var VERSIONE = "2.0.0";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -243,7 +243,7 @@ function api(azione, args, cfgProva) {
   var cfg = cfgProva || leggiCfg();
   if (!cfg && azione === "accediConPin") cfg = { url: MOTORE_URL, token: "" };
   if (!cfg) return Promise.reject(new Error("Dispositivo non collegato."));
-  var corpo = JSON.stringify({ token: cfg.token, azione: azione, args: args || [] });
+  var corpo = JSON.stringify({ token: cfg.token, azione: azione, args: args || [], sess: (S.sess && S.sess.chiave) ? S.sess.chiave : "" });
   var codificato = encodeURIComponent(corpo);
   var richiesta;
   if (codificato.length < 1900) {
@@ -264,6 +264,7 @@ function messaggioErrore(err) {
   if (!navigator.onLine) return "Nessuna connessione: puoi consultare i dati, ma per registrare serve la rete.";
   if (err && err.codice === "TOKEN") return "Accesso scaduto o PIN cambiato: inserisci il PIN.";
   if (err && err.codice === "PIN") return err.message;
+  if (err && err.codice === "AREA") return "Area riservata bloccata: inserisci il PIN.";
   if (err && err.name === "TypeError") return "Motore dati non raggiungibile: controlla la connessione o l'indirizzo /exec.";
   return (err && err.message) ? err.message : String(err);
 }
@@ -277,6 +278,7 @@ function chiama(fn, args, ok) {
     el("attesa").classList.add("nascosto");
     avviso(messaggioErrore(err), true);
     if (err && err.codice === "TOKEN") mostraCollega();
+    if (err && err.codice === "AREA") { S.sess = null; S.eco = null; if (S.vista === "fascicolo") renderFascicolo(); }
   });
 }
 
@@ -419,14 +421,14 @@ function inizializzaVista() {
 function applicaVistaIniziale(v) {
   var tipi = { ferie: "FERIE", permesso: "PERMESSO", malattia: "MALATTIA", presenza: "PRESENZA", chiusura: "CHIUSURA" };
   if (tipi[v]) { S.tipo = tipi[v]; vai("nuova"); return; }
-  if (["richieste", "rapportino", "impostazioni"].indexOf(v) >= 0) { vai(v); return; }
+  if (["richieste", "rapportino", "impostazioni", "fascicolo"].indexOf(v) >= 0) { vai(v); return; }
   vai("home");
 }
 
 function vai(vista, mantieniScroll) {
   if (!S.dati && vista !== "collega") return;
   S.vista = vista;
-  var viste = ["collega", "home", "nuova", "richieste", "rapportino", "impostazioni"];
+  var viste = ["collega", "home", "nuova", "richieste", "rapportino", "fascicolo", "impostazioni"];
   viste.forEach(function (v) { el("v-" + v).classList.toggle("attiva", v === vista); });
   Array.prototype.forEach.call(document.querySelectorAll(".scheda, .menu-voce"), function (b) {
     b.classList.toggle("attiva", b.getAttribute("data-vista") === vista);
@@ -436,6 +438,7 @@ function vai(vista, mantieniScroll) {
   if (vista === "richieste") renderRichieste();
   if (vista === "rapportino") renderRapportino();
   if (vista === "impostazioni") renderImpostazioni();
+  if (vista === "fascicolo") renderFascicolo();
   if (!mantieniScroll) window.scrollTo(0, 0);
 }
 
@@ -455,7 +458,7 @@ function mostraCollega() {
   h += "<div class='campo' style='margin-top:10px'><label for='k-token'>Oppure incolla qui il link o il codice di accesso</label><input type='text' id='k-token' autocomplete='off' autocapitalize='off' spellcheck='false'></div>";
   h += "<button type='button' class='btn' onclick='collega()'>Collega</button>";
   h += "</div></details>";
-  h += "<div class='versione'>Presenze Pre System, versione " + VERSIONE + "</div></div>";
+  h += "<div class='versione'>Lavoro Pre System, versione " + VERSIONE + "</div></div>";
   el("v-collega").innerHTML = h;
   vai("collega");
   setTimeout(function () { var p = el("k-pin"); if (p) p.focus(); }, 150);
@@ -528,6 +531,8 @@ function scollega() {
 }
 
 function confermaScollega() {
+  S.sess = null;
+  S.eco = null;
   localStorage.removeItem(CHIAVE_TOKEN);
   localStorage.removeItem(CHIAVE_DATI);
   S.dati = null;
@@ -655,6 +660,7 @@ function renderHome() {
   h.push("<div class='numero'><b>" + conta.mal + "</b><span>giorni di malattia</span></div>");
   h.push("</div>");
 
+  h.push(bloccoProvaHome());
   h.push(bloccoSaldoHome());
 
   var prossimi = attivi.filter(function (e) { return e.al >= oggi; }).sort(function (x, y) { return x.dal < y.dal ? -1 : 1; }).slice(0, 6);
@@ -686,6 +692,14 @@ function bloccoSaldoHome() {
 function oreDecimali(ore) {
   var n = Math.round(Number(ore || 0) * 100) / 100;
   return (n < 0 ? "-" : "") + Math.abs(n).toFixed(2).replace(".", ",") + " h";
+}
+
+/* Periodo di prova: riquadro in Home fino alla scadenza */
+function bloccoProvaHome() {
+  var fine = S.dati.fineProva;
+  if (!fine || S.dati.oggi > fine) return "";
+  var giorni = Math.round((dataDaIso(fine) - dataDaIso(S.dati.oggi)) / 86400000);
+  return "<div class='sezione-titolo'><h2>Periodo di prova</h2></div><div class='voce voce-attesa' style='cursor:default'><div class='voce-corpo'><div class='voce-titolo'>Termina " + esc(dataEstesa(fine)) + "</div><div class='voce-sub'>" + (giorni === 0 ? "Oggi è l'ultimo giorno" : "Mancano " + giorni + (giorni === 1 ? " giorno" : " giorni")) + "</div></div></div>";
 }
 
 function formatoOreSegno(ore) {
@@ -1362,6 +1376,8 @@ function renderImpostazioni() {
   o.push(campoTesto("i-NOME_REPORT", "Nome nel rapportino", imp.NOME_REPORT, "text"));
   o.push(campoTesto("i-AZIENDA", "Azienda", imp.AZIENDA, "text"));
   o.push(campoTesto("i-DATA_INIZIO_RAPPORTO", "Data di inizio del rapporto (i giorni prima non vengono conteggiati)", imp.DATA_INIZIO_RAPPORTO, "date"));
+  o.push(campoTesto("i-MESI_PROVA", "Durata del periodo di prova (mesi)", imp.MESI_PROVA || "5", "number"));
+  if (S.dati.fineProva) o.push("<p class='aiuto'>Fine del periodo di prova: " + esc(dataEstesa(S.dati.fineProva)) + ". <button type='button' class='btn btn-piccolo' onclick='creaPromemoriaProva()'>" + (S.dati.haProva ? "Ricrea" : "Crea") + " il promemoria nel calendario</button></p>");
   o.push("<div class='riga2'>" + campoTesto("i-MATTINA_INIZIO", "Mattina dalle", imp.MATTINA_INIZIO, "time") + campoTesto("i-MATTINA_FINE", "Mattina alle", imp.MATTINA_FINE, "time") + "</div>");
   o.push("<div class='riga2'>" + campoTesto("i-POMERIGGIO_INIZIO", "Pomeriggio dalle", imp.POMERIGGIO_INIZIO, "time") + campoTesto("i-POMERIGGIO_FINE", "Pomeriggio alle", imp.POMERIGGIO_FINE, "time") + "</div>");
   o.push("<div class='campo'><label for='i-FIRMA_MAIL'>Firma delle mail</label><textarea id='i-FIRMA_MAIL'>" + esc(imp.FIRMA_MAIL) + "</textarea></div>");
@@ -1591,13 +1607,13 @@ function statoDestinatario(id, stato) {
 }
 
 function salvaImpostazioni() {
-  var chiavi = ["NOME_DIPENDENTE", "NOME_REPORT", "AZIENDA", "DATA_INIZIO_RAPPORTO", "MATTINA_INIZIO", "MATTINA_FINE", "POMERIGGIO_INIZIO", "POMERIGGIO_FINE", "FIRMA_MAIL"];
+  var chiavi = ["NOME_DIPENDENTE", "NOME_REPORT", "AZIENDA", "DATA_INIZIO_RAPPORTO", "MESI_PROVA", "MATTINA_INIZIO", "MATTINA_FINE", "POMERIGGIO_INIZIO", "POMERIGGIO_FINE", "FIRMA_MAIL"];
   var d = {};
   chiavi.forEach(function (k) { d[k] = valore("i-" + k); });
   chiama("salvaImpostazioni", [d], function (imp) {
     S.dati.impostazioni = imp;
     salvaCache();
-    aggiornaSaldo();
+    sincronizza(false, true);
     avviso("Dati salvati");
   });
 }
@@ -1645,6 +1661,16 @@ function mostraLogo(uri) {
   if (!img || !uri) return;
   img.src = uri;
   img.classList.remove("nascosto");
+}
+
+function creaPromemoriaProva() {
+  chiama("creaPromemoriaProva", [], function (fine) {
+    S.dati.haProva = true;
+    S.dati.fineProva = fine;
+    salvaCache();
+    renderImpostazioni();
+    avviso("Promemoria creato per il " + dataBreve(fine));
+  });
 }
 
 function creaPromemoria() {

@@ -1,6 +1,6 @@
 {
-  "name": "Presenze Pre System",
-  "short_name": "Presenze",
+  "name": "Lavoro Pre System",
+  "short_name": "Lavoro",
   "id": "./",
   "start_url": "./",
   "scope": "./",
@@ -18,6 +18,7 @@
     { "name": "Richiedi ferie", "url": "./?v=ferie", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
     { "name": "Richiedi un permesso", "url": "./?v=permesso", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
     { "name": "Comunica malattia", "url": "./?v=malattia", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
-    { "name": "Rapportino", "url": "./?v=rapportino", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+    { "name": "Rapportino", "url": "./?v=rapportino", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Fascicolo", "url": "./?v=fascicolo", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

@@ -1,11 +1,12 @@
-/* Presenze Pre System - service worker
+/* Lavoro Pre System - service worker
    Cambia CACHE a ogni nuova versione pubblicata */
-var CACHE = "pps-1.8.2";
+var CACHE = "pps-2.0.0";
 var FILES = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./fascicolo.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

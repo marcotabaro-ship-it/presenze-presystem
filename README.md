@@ -1,4 +1,4 @@
-# Presenze Pre System
+# Lavoro Pre System
 
 App personale (PWA) per registrare ferie, permessi, malattia e lavoro in giorni non lavorativi,
 preparare le mail in Outlook e generare il rapportino mensile delle presenze.
@@ -8,7 +8,7 @@ preparare le mail in Outlook e generare il rapportino mensile delle presenze.
   (calendario "Lavoro Pre System", rapportini nella cartella Drive "Rapportini Presenze Pre System")
 
 ## File del repository
-- index.html, style.css, app.js: interfaccia
+- index.html, style.css, app.js, fascicolo.js: interfaccia
 - manifest.webmanifest, sw.js, icons/: installazione come app e funzionamento offline
 
 Il codice Apps Script NON va in questo repository pubblico: contiene indirizzi email dei colleghi.
