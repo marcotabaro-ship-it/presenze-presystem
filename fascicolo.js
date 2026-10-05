@@ -282,7 +282,7 @@ function caricaFile(f, tipo) {
    --------------------------------------------------------- */
 var GRUPPI_BUSTA = [
   ["Periodo e ore", [["dataPagamento", "Data di pagamento", "date"], ["livello", "Livello / qualifica", "text"], ["oreOrdinarie", "Ore ordinarie", "num"], ["giorniLavorati", "Giorni lavorati", "num"]]],
-  ["Totali", [["lordo", "Totale competenze (lordo)", "num"], ["totTrattenute", "Totale trattenute", "num"], ["arrotondamenti", "Arrotondamenti", "num"], ["netto", "Netto in busta", "num"]]],
+  ["Totali", [["lordo", "Totale competenze (lordo)", "num"], ["totTrattenute", "Totale trattenute", "num"], ["arrotondamenti", "Arrotondamenti", "num"], ["rimborsoSpese", "Rimborsi spese (nota spese)", "num"], ["netto", "Netto in busta", "num"]]],
   ["Contributi e imposte", [["impPrev", "Imponibile previdenziale", "num"], ["inps", "Contributi INPS a tuo carico", "num"], ["impFiscale", "Imponibile fiscale", "num"], ["irpefLorda", "IRPEF lorda", "num"], ["detrazioni", "Detrazioni", "num"], ["irpefNetta", "IRPEF netta trattenuta", "num"], ["addReg", "Addizionale regionale", "num"], ["addCom", "Addizionale comunale", "num"], ["accontoAddCom", "Acconto addizionale comunale", "num"], ["trattIntegrativo", "Trattamento integrativo", "num"], ["fringe", "Fringe benefit auto", "num"]]],
   ["TFR e fondo pensione", [["tfrMese", "TFR maturato nel mese", "num"], ["tfrFondo", "TFR versato al fondo", "num"], ["fondoDip", "Contributo al fondo a tuo carico", "num"], ["fondoAzienda", "Contributo al fondo a carico azienda", "num"]]]
 ];
@@ -822,6 +822,9 @@ function vistaReport() {
     buste.forEach(function (b) { h.push("<div class='barra-riga'><span>" + esc(maiusc(MESI_BREVI[Number(b.mese) - 1]) + " " + b.anno.substr(2)) + "</span><div class='barra'><i style='width:" + Math.round(nv(b.netto) / maxN * 100) + "%'></i></div><b>" + euro(b.netto) + "</b></div>"); });
     h.push("</div>");
   }
+  /* Rimborsi: note spese dei pasti e rimborsi arrivati in busta */
+  h.push(tabellaRimborsi());
+
   /* Analisi di una singola voce */
   var ids = {};
   buste.forEach(function (b) { ids[b.id] = b; });
@@ -879,4 +882,36 @@ function esportaVoce() {
     righe.push([b.anno, b.mese, v.codice, v.descrizione, nv(v.quantita), nv(v.base), nv(v.competenze), nv(v.trattenute)]);
   });
   scaricaCsv("Voce " + S.fFiltri.voce.replace(/[^A-Za-z0-9 ]/g, "") + ".csv", righe);
+}
+
+/* Note spese (pasti fuori) per mese e rimborsi registrati nelle buste paga.
+   Il rimborso arriva di solito nella busta del mese successivo. */
+function tabellaRimborsi() {
+  var mesi = {};
+  (S.dati.pasti || []).filter(function (p) { return p.stato === "ATTIVO" && p.tipo === "FUORI"; }).forEach(function (p) {
+    var k = p.data.substr(0, 7);
+    mesi[k] = mesi[k] || { speso: 0, rimborso: 0 };
+    mesi[k].speso += nv(p.importo);
+  });
+  busteAttive().forEach(function (b) {
+    if (b.rimborsoSpese === "" || b.rimborsoSpese === undefined) return;
+    var d = new Date(Number(b.anno), Number(b.mese) - 2, 1);
+    var k = d.getFullYear() + "-" + pad2(d.getMonth() + 1);
+    mesi[k] = mesi[k] || { speso: 0, rimborso: 0 };
+    mesi[k].rimborso += nv(b.rimborsoSpese);
+  });
+  var chiaviM = Object.keys(mesi).sort().reverse();
+  var h = "<div class='sezione-titolo'><h2>Note spese e rimborsi</h2></div>";
+  if (!chiaviM.length) return h + "<div class='vuoto'>Nessun pasto fuori registrato.</div>";
+  h += "<div class='scorri'><table class='tab-voci sola'><tr><th>Mese della spesa</th><th>Speso</th><th>Rimborsato in busta (mese dopo)</th><th>Da ricevere</th></tr>";
+  var totS = 0, totR = 0;
+  chiaviM.forEach(function (k) {
+    var m = mesi[k];
+    totS += m.speso; totR += m.rimborso;
+    var diff = Math.round((m.speso - m.rimborso) * 100) / 100;
+    h += "<tr><td>" + esc(maiusc(MESI[Number(k.substr(5, 2)) - 1]) + " " + k.substr(0, 4)) + "</td><td>" + euro(m.speso) + "</td><td>" + euro(m.rimborso) + "</td><td class='" + (diff > 0.01 ? "negativo" : "") + "'>" + euro(diff) + "</td></tr>";
+  });
+  h += "<tr class='totale'><td>Totale</td><td>" + euro(totS) + "</td><td>" + euro(totR) + "</td><td>" + euro(Math.round((totS - totR) * 100) / 100) + "</td></tr></table></div>";
+  h += "<p class='aiuto'>Il rimborso si inserisce nella scheda della busta paga, campo Rimborsi spese. Se il tetto per pasto è attivo, la differenza può restare a tuo carico.</p>";
+  return h;
 }

@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "2.0.1";
+var VERSIONE = "2.2.0";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -467,6 +467,7 @@ function vai(vista, mantieniScroll) {
   Array.prototype.forEach.call(document.querySelectorAll(".scheda, .menu-voce"), function (b) {
     b.classList.toggle("attiva", b.getAttribute("data-vista") === vista);
   });
+  if (vista !== "home") { document.body.classList.remove("dash-fissa"); el("v-home").style.height = ""; }
   if (vista === "home") renderHome();
   if (vista === "nuova") renderNuova();
   if (vista === "richieste") renderRichieste();
@@ -629,12 +630,17 @@ function renderHome() {
   var ch = chiusureMappa();
   var attivi = eventiAttivi();
   var h = [];
+  /* Dashboard: su tablet e PC tre zone affiancate che stanno in una sola schermata, su telefono una colonna */
+  h.push("<div class='home-dash'>");
+  h.push("<div class='dash-pasti'>" + bloccoPastiHome() + "</div>");
+  h.push("<div class='dash-cal'>");
   h.push("<div class='cal-testa'><button type='button' class='cal-titolo-btn' onclick='apriSceltaMese()' aria-label='Scegli mese e anno'><h1 class='cal-titolo'>" + maiusc(MESI[m - 1]) + " " + a + "</h1><span class='cal-freccia'>&#9662;</span></button>");
   h.push("<div class='cal-nav'><button type='button' class='btn-nav' onclick='spostaMese(-1)' aria-label='Mese precedente'>&lsaquo;</button>");
   h.push("<button type='button' class='btn-nav' onclick='meseCorrente()' aria-label='Mese corrente'>&bull;</button>");
   h.push("<button type='button' class='btn-nav' onclick='spostaMese(1)' aria-label='Mese successivo'>&rsaquo;</button></div></div>");
 
-  h.push("<div class='cal-griglia'>");
+  var settimane = Math.ceil((((dataDaIso(isoDa(a, m, 1)).getDay() + 6) % 7) + new Date(a, m, 0).getDate()) / 7);
+  h.push("<div class='cal-griglia' style='--settimane:" + settimane + "'>");
   h.push("<div class='cal-gs cal-gs-sett' title='Numero della settimana'>Sett.</div>");
   ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"].forEach(function (g) { h.push("<div class='cal-gs'>" + g + "</div>"); });
   var primoMese = isoDa(a, m, 1);
@@ -678,7 +684,7 @@ function renderHome() {
       });
       if (!et && info.festivo) et = "<span class='cal-fest'>" + esc(info.festivo) + "</span>";
       else if (!et && info.chiusura && info.lavorativo) et = "<span class='cal-ev ev-chiusura'>Ferie coll.</span>";
-      h.push("<button type='button' class='" + cls + "' onclick='apriGiorno(\"" + iso + "\")' aria-label='" + esc(dataEstesa(iso)) + "'><span class='cal-n'>" + g + "</span>" + et + "</button>");
+      h.push("<button type='button' class='" + cls + "' onclick='apriGiorno(\"" + iso + "\")' aria-label='" + esc(dataEstesa(iso)) + "'><span class='cal-n'>" + g + "</span>" + et + cellaPasto(iso, info, evs) + "</button>");
     }
     iso = piuGiorni(iso, 1);
     colonna = (colonna + 1) % 7;
@@ -686,7 +692,9 @@ function renderHome() {
   h.push("</div>");
 
   h.push("<div class='legenda'><span><i style='background:#2E7D52'></i>Ferie e permessi</span><span><i style='background:#B03A3A'></i>Malattia</span><span><i style='background:#2F5FB0'></i>Lavoro festivo</span><span><i style='background:#8C959D'></i>Chiusura aziendale</span><span><i class='l-nl'></i>Non lavorativo</span></div>");
+  h.push("</div>");
 
+  h.push("<div class='dash-lato'><div class='lato-a'>");
   h.push("<div class='numeri'>");
   h.push("<div class='numero'><b>" + conta.lav + "</b><span>giorni lavorativi</span></div>");
   h.push("<div class='numero'><b>" + conta.ferie + "</b><span>giorni di ferie</span></div>");
@@ -696,13 +704,38 @@ function renderHome() {
 
   h.push(bloccoProvaHome());
   h.push(bloccoSaldoHome());
+  h.push("</div>");
 
   var prossimi = attivi.filter(function (e) { return e.al >= oggi; }).sort(function (x, y) { return x.dal < y.dal ? -1 : 1; }).slice(0, 6);
-  h.push("<div class='sezione-titolo'><h2>Prossime assenze e presenze</h2></div>");
+  h.push("<div class='dash-prossimi'><div class='sezione-titolo'><h2>Prossime assenze e presenze</h2>" + (prossimi.length ? "<button type='button' class='btn btn-testo btn-piccolo' onclick='vai(\"richieste\")'>Vedi tutte</button>" : "") + "</div>");
   if (!prossimi.length) h.push("<div class='vuoto'>Nessuna assenza in programma. Tocca un giorno del calendario per registrarne una.</div>");
   else h.push("<div class='lista'>" + prossimi.map(voceEvento).join("") + "</div>");
+  h.push("</div></div></div>");
   el("v-home").innerHTML = h.join("");
+  adattaDashboard();
 }
+
+/* Su tablet e PC la dashboard occupa esattamente l'altezza disponibile: niente scorrimento */
+function adattaDashboard() {
+  var v = el("v-home");
+  if (!v) return;
+  var largo = window.matchMedia("(min-width: 900px) and (min-height: 560px)").matches;
+  if (!largo || !v.classList.contains("attiva")) { v.style.height = ""; document.body.classList.remove("dash-fissa"); return; }
+  document.body.classList.add("dash-fissa");
+  var alto = v.getBoundingClientRect().top + (window.pageYOffset || 0);
+  var schede = el("schede");
+  var hs = schede && window.getComputedStyle(schede).display !== "none" ? schede.getBoundingClientRect().height : 0;
+  v.style.height = Math.max(440, Math.floor(window.innerHeight - alto - hs - 14)) + "px";
+  /* Nell'elenco delle prossime assenze mostro solo le voci che entrano per intero */
+  var box = v.querySelector(".dash-prossimi .lista");
+  if (box) {
+    var limite = box.getBoundingClientRect().bottom;
+    Array.prototype.forEach.call(box.children, function (c) { c.style.display = ""; });
+    Array.prototype.forEach.call(box.children, function (c) { if (c.getBoundingClientRect().bottom > limite + 1) c.style.display = "none"; });
+  }
+}
+
+window.addEventListener("resize", function () { if (S.dati && S.vista === "home") adattaDashboard(); });
 
 /* ---------------------------------------------------------
    SALDO STIMATO DI FERIE E PERMESSI
@@ -730,10 +763,12 @@ function oreDecimali(ore) {
 
 /* Periodo di prova: riquadro in Home fino alla scadenza */
 function bloccoProvaHome() {
-  var fine = S.dati.fineProva;
+  var pe = S.dati.provaEffettiva || {};
+  var fine = pe.effettiva || S.dati.fineProva;
   if (!fine || S.dati.oggi > fine) return "";
   var giorni = Math.round((dataDaIso(fine) - dataDaIso(S.dati.oggi)) / 86400000);
-  return "<div class='sezione-titolo'><h2>Periodo di prova</h2></div><div class='voce voce-attesa' style='cursor:default'><div class='voce-corpo'><div class='voce-titolo'>Termina " + esc(dataEstesa(fine)) + "</div><div class='voce-sub'>" + (giorni === 0 ? "Oggi è l'ultimo giorno" : "Mancano " + giorni + (giorni === 1 ? " giorno" : " giorni")) + "</div></div></div>";
+  var nota = pe.assenze ? "Calendario: " + dataBreve(pe.base) + ", più " + pe.assenze + (pe.assenze === 1 ? " giorno" : " giorni") + " di assenza (5 mesi di effettiva prestazione, da confermare con l'amministrazione)" : "5 mesi di effettiva prestazione: ferie, chiusure e malattia la spostano in avanti";
+  return "<div class='sezione-titolo'><h2>Periodo di prova</h2></div><div class='voce voce-attesa' style='cursor:default'><div class='voce-corpo'><div class='voce-titolo'>Termina " + esc(dataEstesa(fine)) + " (mancano " + giorni + (giorni === 1 ? " giorno" : " giorni") + ")</div><div class='voce-sub'>" + esc(nota) + "</div></div></div>";
 }
 
 function formatoOreSegno(ore) {
@@ -820,6 +855,7 @@ function apriGiorno(iso) {
   } else if (!lavorato) {
     h += "<button type='button' class='btn btn-primario' onclick='nuovaDa(\"PRESENZA\",\"" + iso + "\")'>Segna che ho lavorato</button>";
   }
+  h += sezionePastiGiorno(iso, info, evs);
   if (pc) h += "<button type='button' class='btn btn-pericolo' onclick='confermaEliminaChiusura(\"" + pc.id + "\")'>Elimina la chiusura dal " + dataBreve(pc.dal) + " al " + dataBreve(pc.al) + "</button>";
   h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Chiudi</button>";
   apriFoglio(h);
@@ -959,6 +995,7 @@ function aggiornaAnteprima() {
     else if (infoGiorno(dal).utile) { testo = "Il giorno scelto è già lavorativo: la presenza è conteggiata in automatico."; errore = true; }
     else testo = maiusc(dataEstesa(dal)) + " verrà conteggiato come giorno di presenza.";
   }
+  if (!errore) testo += avvisoPreavviso();
   box.textContent = testo;
   box.classList.toggle("errore", errore);
 }
@@ -1217,6 +1254,7 @@ function renderRapportino() {
     h.push("</div>");
   }
 
+  h.push(bloccoNotaSpese());
   h.push(bloccoReportPeriodo());
 
   var arch = S.dati.rapportini || [];
@@ -1404,6 +1442,9 @@ function renderImpostazioni() {
   var sdc = S.dati.saldo || {};
   caps.push(["saldo", "Ferie e permessi maturati", sdc.configurato ? "Ferie " + formatoOreSegno(sdc.ferie.residuoOggi) + ", permessi " + formatoOreSegno(sdc.permessi.residuoOggi) + " a oggi" : "Da configurare", corpoSaldo(), !sdc.configurato]);
 
+  caps.push(capitoloMensa());
+  caps.push(capitoloFatture());
+
   /* Dati e orario */
   var o = [];
   o.push(campoTesto("i-NOME_DIPENDENTE", "Nome nelle mail", imp.NOME_DIPENDENTE, "text"));
@@ -1462,6 +1503,7 @@ function renderImpostazioni() {
   });
   h.push("</div>");
   el("v-impostazioni").innerHTML = h.join("");
+  if (S.capitolo === "mensa") mostraQrImpostazioni();
   if (S.capitolo === "logo" && S.dati.haLogo) {
     chiama("getLogoAnteprima", [], function (uri) { mostraLogo(uri); });
   }
@@ -1716,4 +1758,5 @@ function creaPromemoria() {
   });
 }
 
-avvio();
+/* Avvio quando tutti i file dell'app (app.js, pasti.js, fascicolo.js) sono caricati */
+document.addEventListener("DOMContentLoaded", avvio);
