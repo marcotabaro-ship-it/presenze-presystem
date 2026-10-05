@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "2.2.0";
+var VERSIONE = "2.2.1";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";

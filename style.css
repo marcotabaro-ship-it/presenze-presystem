@@ -460,3 +460,9 @@ details.blocco summary { cursor: pointer; padding: 2px 0; }
   .dash-lato { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; overflow: visible; }
   .dash-prossimi { max-height: 330px; }
 }
+
+/* Caricamento: zona bloccata finché manca il titolo */
+.zona-carica.bloccata { background: #F1F3F4; border-color: #D3D8DC; }
+.zona-carica.bloccata .zona-testo { color: var(--attesa); font-weight: 600; }
+.zona-carica.bloccata label.btn { background: #B9C3CB; border-color: #B9C3CB; cursor: not-allowed; }
+.campo input.campo-mancante { border-color: var(--malattia); box-shadow: 0 0 0 3px var(--malattia-chiaro); }

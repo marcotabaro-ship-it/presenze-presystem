@@ -231,23 +231,59 @@ function caricaEco(dopo) {
 /* ---------------------------------------------------------
    CARICAMENTO FILE: trascinamento o pulsante
    --------------------------------------------------------- */
+/* Campo del titolo obbligatorio per tipo di caricamento (le buste paga e le CU hanno il nome automatico) */
+var CAMPO_TITOLO = { DOCUMENTO: "c-titdoc", AUTO: "c-titauto" };
+var TESTO_ZONA_LIBERA = "Trascina qui il file (PDF o immagine, massimo 15 MB)";
+var TESTO_ZONA_BLOCCATA = "Scrivi prima il titolo: poi potrai trascinare qui il file";
+
 function zonaCaricamento(tipo, campiHtml) {
+  var bloccata = !!CAMPO_TITOLO[tipo];
   var h = "<div class='blocco'>" + (campiHtml || "");
-  h += "<div class='zona-carica' id='zona-" + tipo + "' ondragover='trascinaSopra(event,\"" + tipo + "\")' ondragleave='trascinaFuori(\"" + tipo + "\")' ondrop='rilascia(event,\"" + tipo + "\")'>";
-  h += "<div class='zona-testo'>Trascina qui il file (PDF o immagine, massimo 15 MB)</div>";
-  h += "<label class='btn btn-primario btn-piccolo'>+ Carica<input type='file' accept='application/pdf,image/*' class='nascosto' onchange='fileScelto(this,\"" + tipo + "\")'></label>";
+  h += "<div class='zona-carica" + (bloccata ? " bloccata" : "") + "' id='zona-" + tipo + "' ondragover='trascinaSopra(event,\"" + tipo + "\")' ondragleave='trascinaFuori(\"" + tipo + "\")' ondrop='rilascia(event,\"" + tipo + "\")'>";
+  h += "<div class='zona-testo' id='zona-testo-" + tipo + "'>" + (bloccata ? TESTO_ZONA_BLOCCATA : TESTO_ZONA_LIBERA) + "</div>";
+  h += "<label class='btn btn-primario btn-piccolo' id='zona-btn-" + tipo + "'>+ Carica<input type='file' id='zona-file-" + tipo + "' accept='application/pdf,image/*' class='nascosto'" + (bloccata ? " disabled" : "") + " onchange='fileScelto(this,\"" + tipo + "\")'></label>";
   h += "</div></div>";
   return h;
 }
 
-function trascinaSopra(e, tipo) { e.preventDefault(); el("zona-" + tipo).classList.add("sopra"); }
+function titoloValido(tipo) {
+  var id = CAMPO_TITOLO[tipo];
+  if (!id) return true;
+  return valore(id).length >= 3;
+}
+
+/* Sblocca la zona di caricamento solo quando il titolo ha almeno 3 caratteri */
+function aggiornaZona(tipo) {
+  var ok = titoloValido(tipo);
+  var z = el("zona-" + tipo), t = el("zona-testo-" + tipo), inp = el("zona-file-" + tipo);
+  if (!z) return;
+  z.classList.toggle("bloccata", !ok);
+  if (t) t.textContent = ok ? TESTO_ZONA_LIBERA : TESTO_ZONA_BLOCCATA;
+  if (inp) inp.disabled = !ok;
+}
+
+function richiamaTitolo(tipo) {
+  avviso("Scrivi prima il titolo del documento (almeno 3 caratteri).", true);
+  var c = el(CAMPO_TITOLO[tipo]);
+  if (c) { c.focus(); c.classList.add("campo-mancante"); setTimeout(function () { c.classList.remove("campo-mancante"); }, 2500); }
+}
+
+function trascinaSopra(e, tipo) { e.preventDefault(); if (titoloValido(tipo)) el("zona-" + tipo).classList.add("sopra"); }
 function trascinaFuori(tipo) { var z = el("zona-" + tipo); if (z) z.classList.remove("sopra"); }
 function rilascia(e, tipo) {
   e.preventDefault();
   trascinaFuori(tipo);
+  if (!titoloValido(tipo)) { richiamaTitolo(tipo); return; }
   var f = e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files[0] : null;
   if (f) caricaFile(f, tipo);
 }
+document.addEventListener("click", function (e) {
+  var lbl = e.target && e.target.closest ? e.target.closest("label[id^='zona-btn-']") : null;
+  if (!lbl) return;
+  var tipo = lbl.id.replace("zona-btn-", "");
+  if (!titoloValido(tipo)) { e.preventDefault(); richiamaTitolo(tipo); }
+}, true);
+
 function fileScelto(input, tipo) {
   var f = input.files[0];
   input.value = "";
@@ -261,10 +297,36 @@ function metaCaricamento(tipo) {
   return { tipo: "DOCUMENTO", categoria: valore("c-catdoc"), titolo: valore("c-titdoc"), anno: S.dati.oggi.substr(0, 4) };
 }
 
+var NOMI_CARICAMENTO = { BUSTA: "Busta paga", CU: "Certificazione Unica", DOCUMENTO: "Documento", AUTO: "Documento dell'auto" };
+
+/* Prima del caricamento: controllo dei dati obbligatori e riepilogo da confermare */
 function caricaFile(f, tipo) {
   if (f.size > 15 * 1024 * 1024) { avviso("Il file supera 15 MB.", true); return; }
+  if (!titoloValido(tipo)) { richiamaTitolo(tipo); return; }
   var meta = metaCaricamento(tipo);
-  if (tipo === "AUTO" && meta.categoria !== "Altro" && !meta.titolo) meta.titolo = meta.categoria;
+  if (tipo === "BUSTA" && (!/^\d{4}$/.test(String(meta.anno)) || !meta.mese)) { avviso("Indica mese e anno della busta paga.", true); return; }
+  if (tipo === "CU" && !/^\d{4}$/.test(String(meta.anno))) { avviso("Indica l'anno della CU.", true); return; }
+  S.caricamentoPendente = { file: f, tipo: tipo, meta: meta };
+  var righe = [["Tipo", NOMI_CARICAMENTO[tipo]], ["File", f.name]];
+  if (tipo === "BUSTA") righe.push(["Periodo", maiusc(MESI[Number(meta.mese) - 1]) + " " + meta.anno + (meta.tipoBusta !== "Mensile" ? ", " + meta.tipoBusta : "")]);
+  if (tipo === "CU") righe.push(["Anno dei redditi", meta.anno]);
+  if (tipo === "DOCUMENTO" || tipo === "AUTO") { righe.push(["Categoria", meta.categoria]); righe.push(["Titolo", meta.titolo]); }
+  if (tipo === "AUTO") { var v = veicoloDaId(meta.veicoloId); if (v) righe.push(["Auto", v.marca + " " + v.modello + " " + v.targa]); }
+  var h = "<h2>Confermi il caricamento?</h2><div class='sottotitolo'>Controlla i dati: il file verrà salvato nel fascicolo con questi riferimenti.</div><div class='dettagli'>";
+  righe.forEach(function (r) { h += "<div><span>" + esc(r[0]) + "</span><span>" + esc(r[1]) + "</span></div>"; });
+  h += "</div><button type='button' class='btn btn-primario' onclick='confermaCaricamento()'>Carica</button><button type='button' class='btn btn-testo' onclick='S.caricamentoPendente=null;chiudiFoglio()'>Annulla e correggi</button>";
+  apriFoglio(h);
+}
+
+function confermaCaricamento() {
+  var p = S.caricamentoPendente;
+  if (!p) return;
+  S.caricamentoPendente = null;
+  chiudiFoglio();
+  inviaFile(p.file, p.tipo, p.meta);
+}
+
+function inviaFile(f, tipo, meta) {
   var r = new FileReader();
   r.onload = function () {
     var base64 = String(r.result).split(",")[1];
@@ -653,7 +715,7 @@ function schedaVeicolo(v, attivo) {
   var docs = (S.eco.documenti || []).filter(function (d) { return d.tipo === "AUTO" && d.veicoloId === v.id; });
   h.push("<div class='sezione-titolo'><h3>Documenti dell'auto</h3></div>");
   if (attivo) {
-    var campi = "<div class='riga2'><div class='campo'><label for='c-catauto'>Tipo di documento</label><select id='c-catauto'>" + opzioni(S.eco.liste.categorieAuto, "Libretto") + "</select></div>" + campoF("c-titauto", "Titolo (facoltativo)", "", "text") + "</div><input type='hidden' id='c-veicolo' value='" + esc(v.id) + "'>";
+    var campi = "<div class='riga2'><div class='campo'><label for='c-catauto'>Tipo di documento</label><select id='c-catauto'>" + opzioni(S.eco.liste.categorieAuto, "Libretto") + "</select></div>" + campoF("c-titauto", "Titolo (obbligatorio)", "", "text", " oninput='aggiornaZona(\"AUTO\")' placeholder='Es. Libretto di circolazione'") + "</div><input type='hidden' id='c-veicolo' value='" + esc(v.id) + "'>";
     h.push(zonaCaricamento("AUTO", campi));
   }
   if (!docs.length) h.push("<div class='vuoto'>Nessun documento.</div>");
@@ -762,7 +824,7 @@ function rigaDocumento(d) {
 
 function vistaDocumenti() {
   var h = [];
-  var campi = "<h3>Carica un documento</h3><div class='riga2'><div class='campo'><label for='c-catdoc'>Categoria</label><select id='c-catdoc'>" + opzioni(S.eco.liste.categorieDoc, "Contratto e assunzione") + "</select></div>" + campoF("c-titdoc", "Titolo", "", "text") + "</div>";
+  var campi = "<h3>Carica un documento</h3><div class='riga2'><div class='campo'><label for='c-catdoc'>Categoria</label><select id='c-catdoc'>" + opzioni(S.eco.liste.categorieDoc, "Contratto e assunzione") + "</select></div>" + campoF("c-titdoc", "Titolo (obbligatorio)", "", "text", " oninput='aggiornaZona(\"DOCUMENTO\")' placeholder='Es. Contratto di lavoro 01-09-2026'") + "</div>";
   h.push(zonaCaricamento("DOCUMENTO", campi));
   h.push("<p class='aiuto'>Buste paga, CU e documenti dell'auto si caricano dalle rispettive schede; qui li trovi tutti insieme.</p>");
   var anni = {};
