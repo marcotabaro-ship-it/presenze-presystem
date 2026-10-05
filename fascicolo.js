@@ -249,6 +249,7 @@ function zonaCaricamento(tipo, campiHtml) {
 function titoloValido(tipo) {
   var id = CAMPO_TITOLO[tipo];
   if (!id) return true;
+  if (tipo === "AUTO" && !valore("c-catauto")) return false;
   return valore(id).length >= 3;
 }
 
@@ -263,6 +264,7 @@ function aggiornaZona(tipo) {
 }
 
 function richiamaTitolo(tipo) {
+  if (tipo === "AUTO" && !valore("c-catauto")) { avviso("Scegli prima il tipo di documento.", true); var s = el("c-catauto"); if (s) s.focus(); return; }
   avviso("Scrivi prima il titolo del documento (almeno 3 caratteri).", true);
   var c = el(CAMPO_TITOLO[tipo]);
   if (c) { c.focus(); c.classList.add("campo-mancante"); setTimeout(function () { c.classList.remove("campo-mancante"); }, 2500); }
@@ -647,6 +649,8 @@ function schedaVeicolo(v, attivo) {
   h.push("<div class='dettagli'>");
   h.push("<div><span>Targa</span><span>" + esc(v.targa || "-") + "</span></div>");
   h.push("<div><span>Alimentazione</span><span>" + esc(NOMI_ALIM[v.alimentazione] || v.alimentazione) + "</span></div>");
+  if (v.cilindrata || v.kw) h.push("<div><span>Motore</span><span>" + (v.cilindrata ? esc(numIt(v.cilindrata, 0)) + " cm3" : "") + (v.cilindrata && v.kw ? ", " : "") + (v.kw ? esc(numIt(v.kw, 0)) + " kW (" + Math.round(nv(v.kw) * 1.36) + " CV)" : "") + "</span></div>");
+  if (v.telaio) h.push("<div><span>Telaio</span><span>" + esc(v.telaio) + "</span></div>");
   if (v.co2) h.push("<div><span>CO2</span><span>" + esc(v.co2) + " g/km</span></div>");
   h.push("<div><span>Prima immatricolazione</span><span>" + esc(dataBreve(v.immatricolazione)) + "</span></div>");
   h.push("<div><span>Assegnata dal</span><span>" + esc(dataBreve(v.concessione)) + (v.restituzione ? " al " + esc(dataBreve(v.restituzione)) : "") + "</span></div>");
@@ -687,7 +691,7 @@ function schedaVeicolo(v, attivo) {
     }
     h.push("</details>");
   });
-  h.push("<p class='aiuto'>Il costo chilometrico si trova nelle tabelle ACI dell'anno (sito ACI, sezione fringe benefit, per marca, modello e versione). Le tabelle escono a dicembre per l'anno successivo. Calcolo secondo l'art. 51 del TUIR aggiornato al D.Lgs. 148/2026; il dato ufficiale è quello in busta paga.</p>");
+  h.push("<p class='aiuto'>" + (v.kw ? "Nelle tabelle ACI cerca: " + esc(v.marca + " " + v.modello) + ", " + (v.alimentazione === "ELETTRICA" ? "elettrica" : (v.alimentazione === "PLUGIN" ? "ibrida plug-in" : "") ) + " " + esc(numIt(v.cilindrata, 0)) + " cm3, " + esc(numIt(v.kw, 0)) + " kW. " : "") + "Il costo chilometrico si trova nelle tabelle ACI dell'anno (sito ACI, sezione fringe benefit, per marca, modello e versione). Le tabelle escono a dicembre per l'anno successivo. Calcolo secondo l'art. 51 del TUIR aggiornato al D.Lgs. 148/2026; il dato ufficiale è quello in busta paga.</p>");
 
   /* Scadenze */
   var sc = (S.eco.scadenze || []).filter(function (s) { return s.veicoloId === v.id; }).sort(function (a, b) { return a.data < b.data ? -1 : 1; });
@@ -715,7 +719,7 @@ function schedaVeicolo(v, attivo) {
   var docs = (S.eco.documenti || []).filter(function (d) { return d.tipo === "AUTO" && d.veicoloId === v.id; });
   h.push("<div class='sezione-titolo'><h3>Documenti dell'auto</h3></div>");
   if (attivo) {
-    var campi = "<div class='riga2'><div class='campo'><label for='c-catauto'>Tipo di documento</label><select id='c-catauto'>" + opzioni(S.eco.liste.categorieAuto, "Libretto") + "</select></div>" + campoF("c-titauto", "Titolo (obbligatorio)", "", "text", " oninput='aggiornaZona(\"AUTO\")' placeholder='Es. Libretto di circolazione'") + "</div><input type='hidden' id='c-veicolo' value='" + esc(v.id) + "'>";
+    var campi = "<div class='riga2'><div class='campo'><label for='c-catauto'>Tipo di documento</label><select id='c-catauto' onchange='titoloAutoProposto(\"" + v.id + "\")'>" + opzioni([["", "Scegli il tipo"]].concat(S.eco.liste.categorieAuto), "") + "</select></div>" + campoF("c-titauto", "Titolo (obbligatorio)", "", "text", " oninput='this.setAttribute(\"data-proposto\",\"0\");aggiornaZona(\"AUTO\")' placeholder='Scegli il tipo: il titolo viene proposto'") + "</div><input type='hidden' id='c-veicolo' value='" + esc(v.id) + "'>";
     h.push(zonaCaricamento("AUTO", campi));
   }
   if (!docs.length) h.push("<div class='vuoto'>Nessun documento.</div>");
@@ -731,38 +735,83 @@ function formAuto(id) {
 }
 
 function formVeicolo() {
-  var v = S.fForm.id ? veicoloDaId(S.fForm.id) : {};
+  var nuovaAuto = !S.fForm.id;
+  var v = S.fForm.id ? veicoloDaId(S.fForm.id) : (S.fForm.letto || {});
+  var letto = S.fForm.letto || null;
   var attivo = (S.eco.veicoli || []).filter(function (x) { return x.stato === "ATTIVO"; })[0];
-  var h = ["<div class='blocco'><h3>" + (S.fForm.id ? "Modifica i dati dell'auto" : (attivo ? "Nuova auto aziendale" : "Auto aziendale")) + "</h3>"];
-  if (!S.fForm.id && attivo) h.push("<div class='avvertenza'>L'auto attuale (" + esc(attivo.marca + " " + attivo.modello + " " + attivo.targa) + ") diventerà obsoleta con restituzione il giorno prima della nuova assegnazione. Tutti i suoi dati restano in archivio.</div>");
+  var h = ["<div class='blocco'><h3>" + (!nuovaAuto ? "Modifica i dati dell'auto" : (attivo ? "Nuova auto aziendale" : "Auto aziendale")) + "</h3>"];
+  if (nuovaAuto && attivo) h.push("<div class='avvertenza'>L'auto attuale (" + esc(attivo.marca + " " + attivo.modello + " " + attivo.targa) + ") diventerà obsoleta con restituzione il giorno prima della nuova assegnazione. Tutti i suoi dati restano in archivio.</div>");
+
+  /* Primo passo per un'auto nuova: il libretto, letto in automatico */
+  if (nuovaAuto && !letto) {
+    h.push("<p class='aiuto'>Carica il libretto di circolazione (PDF o foto): l'app legge i dati e compila la scheda. Il libretto viene poi archiviato tra i documenti dell'auto.</p>");
+    h.push("<div class='zona-carica' id='zona-LIBRETTO' ondragover='event.preventDefault();this.classList.add(\"sopra\")' ondragleave='this.classList.remove(\"sopra\")' ondrop='rilasciaLibretto(event)'>");
+    h.push("<div class='zona-testo'>Trascina qui il libretto (PDF o immagine, massimo 15 MB)</div>");
+    h.push("<label class='btn btn-primario btn-piccolo'>Carica il libretto<input type='file' accept='application/pdf,image/*' class='nascosto' onchange='libretto(this.files[0]);this.value=\"\"'></label></div>");
+    h.push("<button type='button' class='btn btn-testo' onclick='S.fForm.letto={manuale:true};renderFascicolo()'>Non ho il libretto: inserisco i dati a mano</button>");
+    h.push("<button type='button' class='btn btn-testo' onclick='S.fForm=null;renderFascicolo()'>Annulla</button></div>");
+    return h.join("");
+  }
+  if (letto && !letto.manuale) {
+    if (letto.letto && letto.trovati && letto.trovati.length) h.push("<div class='anteprima'>Dal libretto ho letto: " + esc(letto.trovati.join(", ")) + ". Controlla i campi e completa quelli che il libretto non contiene.</div>");
+    else h.push("<div class='avvertenza'>Non sono riuscito a leggere il libretto: compila i campi a mano. Il file è comunque salvato e verrà archiviato con l'auto.</div>");
+    if (letto.chiediPlugin) h.push("<div class='avvertenza'>Il libretto indica alimentazione mista (" + esc(letto.p3) + "): scegli tu se è un'ibrida plug-in (ricaricabile dalla presa) o un'ibrida normale. Cambia la percentuale del fringe benefit: 20% contro 50%.</div>");
+  }
   h.push("<p class='aiuto'>Tra parentesi il campo del libretto di circolazione in cui trovi il dato.</p><div class='griglia-campi'>");
   h.push(campoF("ve-marca", "Marca (D.1)", v.marca, "text"));
   h.push(campoF("ve-modello", "Modello, denominazione commerciale (D.3)", v.modello, "text"));
-  h.push(campoF("ve-versione", "Versione (D.2), utile per le tabelle ACI", v.versione, "text"));
+  h.push(campoF("ve-versione", "Versione (D.2)", v.versione, "text"));
   h.push(campoF("ve-targa", "Targa (A)", v.targa, "text"));
-  h.push("<div class='campo'><label for='ve-alimentazione'>Alimentazione (P.3)</label><select id='ve-alimentazione'>" + opzioni([["ALTRO", NOMI_ALIM.ALTRO], ["PLUGIN", NOMI_ALIM.PLUGIN], ["ELETTRICA", NOMI_ALIM.ELETTRICA]], v.alimentazione || "ALTRO") + "</select></div>");
+  h.push(campoF("ve-telaio", "Telaio (E)", v.telaio, "text"));
+  h.push(campoF("ve-cilindrata", "Cilindrata cm3 (P.1)", v.cilindrata, "num"));
+  h.push(campoF("ve-kw", "Potenza kW (P.2)", v.kw, "num"));
+  h.push("<div class='campo'><label for='ve-alimentazione'>Alimentazione (P.3)" + (v.p3 ? ": sul libretto " + esc(v.p3) : "") + "</label><select id='ve-alimentazione'>" + opzioni([["ALTRO", NOMI_ALIM.ALTRO], ["PLUGIN", NOMI_ALIM.PLUGIN], ["ELETTRICA", NOMI_ALIM.ELETTRICA]], v.alimentazione || "ALTRO") + "</select></div>");
   h.push(campoF("ve-co2", "Emissioni CO2 g/km (V.7)", v.co2, "num"));
   h.push(campoF("ve-immatricolazione", "Prima immatricolazione (B)", v.immatricolazione, "date"));
-  h.push(campoF("ve-concessione", "Data di assegnazione a te", v.concessione, "date"));
+  h.push(campoF("ve-concessione", "Data di assegnazione a te (non è sul libretto)", v.concessione, "date"));
   h.push(campoF("ve-contributoAnnuo", "Contributo annuo trattenuto in busta (se c'è)", v.contributoAnnuo, "num"));
   h.push("</div>");
-  h.push("<label class='spunta'><input type='checkbox' id='ve-ordinata2024'" + (v.ordinata2024 === "SI" ? " checked" : "") + "> Ordinata dall'azienda entro il 31/12/2024 (chiedilo all'amministrazione se l'assegnazione è del 2025)</label>");
+  h.push("<label class='spunta'><input type='checkbox' id='ve-ordinata2024'" + (v.ordinata2024 === "SI" ? " checked" : "") + "> Ordinata dall'azienda entro il 31/12/2024 (conta solo se l'auto ti è stata assegnata nel 2025)</label>");
   h.push("<label class='spunta'><input type='checkbox' id='ve-optional'" + (v.optional === "SI" ? " checked" : "") + "> Ha optional o allestimenti non compresi nelle tabelle ACI</label>");
   h.push("<div class='campo'><label for='ve-note'>Note</label><textarea id='ve-note'>" + esc(v.note || "") + "</textarea></div>");
   h.push("<button type='button' class='btn btn-primario' onclick='salvaVeicolo()'>Salva</button><button type='button' class='btn btn-testo' onclick='S.fForm=null;renderFascicolo()'>Annulla</button></div>");
   return h.join("");
 }
 
+function rilasciaLibretto(e) {
+  e.preventDefault();
+  var f = e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files[0] : null;
+  if (f) libretto(f);
+}
+
+/* Invio del libretto: lettura automatica dei campi e scheda precompilata */
+function libretto(f) {
+  if (!f) return;
+  if (f.size > 15 * 1024 * 1024) { avviso("Il file supera 15 MB.", true); return; }
+  var r = new FileReader();
+  r.onload = function () {
+    avviso("Lettura del libretto in corso...");
+    chiama("ecoLeggiLibretto", [String(r.result).split(",")[1], f.type || "application/pdf", f.name], function (dati) {
+      S.fForm.letto = dati;
+      renderFascicolo();
+      window.scrollTo(0, 0);
+    });
+  };
+  r.readAsDataURL(f);
+}
+
 function salvaVeicolo() {
   var d = { id: S.fForm.id || "" };
-  ["marca", "modello", "versione", "targa", "alimentazione", "co2", "immatricolazione", "concessione", "contributoAnnuo"].forEach(function (k) { d[k] = valore("ve-" + k); });
+  ["marca", "modello", "versione", "targa", "telaio", "cilindrata", "kw", "alimentazione", "co2", "immatricolazione", "concessione", "contributoAnnuo"].forEach(function (k) { d[k] = valore("ve-" + k); });
   d.ordinata2024 = el("ve-ordinata2024").checked;
   d.optional = el("ve-optional").checked;
   d.note = el("ve-note").value;
+  if (S.fForm.letto && S.fForm.letto.librettoFileId) d.librettoFileId = S.fForm.letto.librettoFileId;
   chiama("ecoSalvaVeicolo", [d], function () {
+    var conLibretto = !!d.librettoFileId;
     S.fForm = null;
     caricaEco();
-    avviso("Dati dell'auto salvati");
+    avviso(conLibretto ? "Auto salvata e libretto archiviato tra i documenti dell'auto" : "Dati dell'auto salvati");
   });
 }
 
@@ -976,4 +1025,26 @@ function tabellaRimborsi() {
   h += "<tr class='totale'><td>Totale</td><td>" + euro(totS) + "</td><td>" + euro(totR) + "</td><td>" + euro(Math.round((totS - totR) * 100) / 100) + "</td></tr></table></div>";
   h += "<p class='aiuto'>Il rimborso si inserisce nella scheda della busta paga, campo Rimborsi spese. Se il tetto per pasto è attivo, la differenza può restare a tuo carico.</p>";
   return h;
+}
+
+/* Titolo proposto per i documenti dell'auto: si può modificare prima di caricare */
+function titoloAutoProposto(veicoloId) {
+  var v = veicoloDaId(veicoloId);
+  var cat = valore("c-catauto");
+  var t = el("c-titauto");
+  if (!v || !t) return;
+  var auto = (v.marca + " " + v.modello).trim().toUpperCase() + " " + v.targa;
+  var data = v.concessione ? v.concessione.split("-").reverse().join("-") : "";
+  var proposte = {
+    "Libretto": "Carta di circolazione " + auto,
+    "Contratto di assegnazione": "Concessione in uso " + auto + (data ? " dal " + data : ""),
+    "Assicurazione": "Assicurazione RCA " + auto + " " + S.dati.oggi.substr(0, 4),
+    "Noleggio o leasing": "Contratto di noleggio " + auto,
+    "Verbale o multa": "Verbale " + auto + " del " + S.dati.oggi.split("-").reverse().join("-")
+  };
+  if (!t.value || t.getAttribute("data-proposto") === "1") {
+    t.value = proposte[cat] || "";
+    t.setAttribute("data-proposto", proposte[cat] ? "1" : "0");
+  }
+  aggiornaZona("AUTO");
 }
