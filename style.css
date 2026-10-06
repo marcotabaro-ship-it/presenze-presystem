@@ -214,7 +214,7 @@ button, input, select, textarea { font-family: inherit; font-size: 16px; color: 
 .dest-campo.cc { background: #EEF0F2; color: var(--ardesia); }
 .dest-corpo { flex: 1; min-width: 0; }
 .dest-nome { font-weight: 600; }
-.dest-mail { font-size: 14px; color: var(--ardesia); word-break: break-all; }
+.dest-mail { font-size: 14px; color: var(--ardesia); overflow-wrap: anywhere; word-break: normal; }
 .dest-obs .dest-nome, .dest-obs .dest-mail { color: var(--spento); }
 details summary { cursor: pointer; color: var(--ardesia); font-size: 15px; padding: 8px 0; }
 .logo-anteprima { max-width: 220px; max-height: 70px; display: block; margin-bottom: 12px; }
@@ -478,3 +478,28 @@ body.visore-aperto { overflow: hidden; }
 .visore-pagina { max-width: 100%; height: auto; background: #FFFFFF; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
 .visore-img { max-width: 100%; height: auto; display: block; margin: auto; background: #FFFFFF; }
 .visore-frame { width: 100%; flex: 1; min-height: 80vh; border: 0; background: #FFFFFF; }
+
+/* Scheda documento: leggibile su telefono, compatta su tablet e PC */
+.doc-scheda { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #EDF0F2; }
+.doc-scheda:last-child { border-bottom: 0; }
+.doc-corpo { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left; background: none; border: 0; padding: 0; color: inherit; text-decoration: none; cursor: pointer; font: inherit; }
+.doc-icona { flex: none; width: 40px; height: 48px; border-radius: 6px; background: #F6E3E1; color: #A3332A; font-family: "Barlow Semi Condensed", Arial, sans-serif; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; border: 1px solid #EBC9C5; }
+.doc-icona.img { background: #E2EEF3; color: var(--accento); border-color: #C9DDE5; }
+.doc-testi { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.doc-titolo { font-weight: 600; font-size: 16px; line-height: 1.3; color: var(--inchiostro); overflow-wrap: anywhere; }
+.doc-sub { font-size: 13.5px; color: var(--ardesia); line-height: 1.35; }
+.doc-azioni { display: flex; gap: 8px; flex: none; }
+.doc-scheda.obsoleto .doc-titolo, .doc-scheda.obsoleto .doc-sub { color: var(--spento); }
+.doc-scheda.obsoleto .doc-icona { opacity: 0.5; }
+.btn-pericolo-tenue { color: var(--malattia); border-color: #E9C3C0; background: var(--superficie); }
+@media (max-width: 640px) {
+  .doc-scheda { flex-direction: column; align-items: stretch; gap: 8px; }
+  .doc-azioni { padding-left: 52px; }
+  .doc-azioni .btn { flex: 1; }
+  .dest { flex-wrap: wrap; }
+  .dest .dest-corpo { flex: 1 1 60%; }
+}
+/* Eventi di lavoro */
+.cal-ev.ev-lavoro { background: #FCE7D6; color: #A14E12; }
+.voce-evento { border-left: 4px solid #E07A2E; }
+.btn-evento { width: 100%; margin: 4px 0 14px 0; border-style: dashed; color: #A14E12; border-color: #E8B48C; background: #FFF8F2; }

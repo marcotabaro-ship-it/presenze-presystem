@@ -871,12 +871,14 @@ function salvaEventoAuto(veicoloId) {
 /* ---------------------------------------------------------
    DOCUMENTI
    --------------------------------------------------------- */
-var NOMI_TIPO_DOC = { BUSTA: "Busta paga", CU: "CU", DOCUMENTO: "Documento", AUTO: "Auto" };
+var NOMI_TIPO_DOC = { BUSTA: "Busta paga", CU: "CU", DOCUMENTO: "Documento", AUTO: "Auto", EVENTO: "Evento di lavoro" };
 
 function rigaDocumento(d) {
   var att = d.stato === "ATTIVO";
-  var sub = NOMI_TIPO_DOC[d.tipo] + (d.categoria && d.tipo !== "CU" ? ", " + d.categoria : "") + ", caricato il " + dataBreve(d.caricato) + (att ? "" : ", obsoleto dal " + dataBreve(d.obsoleto));
-  return "<div class='dest" + (att ? "" : " dest-obs") + "'><div class='dest-corpo'><div class='dest-nome'>" + esc(d.titolo || d.nomeFile) + "</div><div class='dest-mail'>" + esc(sub) + "</div></div><div class='azioni-riga'>" + linkApri(d.id, "Apri") + "<button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + d.id + "\")'>Condividi</button><button type='button' class='btn btn-piccolo" + (att ? " btn-pericolo" : "") + "' onclick='statoDocumento(\"" + d.id + "\",\"" + (att ? "OBSOLETO" : "ATTIVO") + "\")'>" + (att ? "Obsoleto" : "Riattiva") + "</button></div></div>";
+  var sub = (NOMI_TIPO_DOC[d.tipo] || "Documento") + (d.categoria && d.tipo !== "CU" ? ", " + d.categoria : "") + ", caricato il " + dataBreve(d.caricato) + (att ? "" : ", obsoleto dal " + dataBreve(d.obsoleto));
+  var azioni = "<button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + d.id + "\")'>Condividi</button>";
+  azioni += att ? "<button type='button' class='btn btn-piccolo btn-pericolo-tenue' onclick='confermaObsoleto(\"" + d.id + "\",\"fascicolo\")'>Obsoleto</button>" : "<button type='button' class='btn btn-piccolo' onclick='statoDocumento(\"" + d.id + "\",\"ATTIVO\")'>Riattiva</button>";
+  return schedaDocumentoHtml({ titolo: d.titolo || d.nomeFile, sub: sub, nomeFile: d.nomeFile, href: d.fileId ? urlDrive(d.fileId) : "", alClic: "apriDocumento(\"" + d.id + "\")", obsoleto: !att, azioni: azioni });
 }
 
 function vistaDocumenti() {

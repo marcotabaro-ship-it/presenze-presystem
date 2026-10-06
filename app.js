@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "2.5.0";
+var VERSIONE = "2.6.0";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -441,6 +441,7 @@ function sincronizza(bloccante, silenzioso, forza) {
     S.dati.oggi = oggiLocale();
     S.festCache = {};
     salvaCache();
+    setTimeout(preparaBigliettiOffline, 1500);
     if (primo) inizializzaVista();
     else if (["nuova"].indexOf(S.vista) < 0 && el("foglio").classList.contains("nascosto")) vai(S.vista, true);
     if (!silenzioso) avviso("Dati aggiornati");
@@ -707,7 +708,7 @@ function renderHome() {
       });
       if (!et && info.festivo) et = "<span class='cal-fest'>" + esc(info.festivo) + "</span>";
       else if (!et && info.chiusura && info.lavorativo) et = "<span class='cal-ev ev-chiusura'>Ferie coll.</span>";
-      h.push("<button type='button' class='" + cls + "' onclick='apriGiorno(\"" + iso + "\")' aria-label='" + esc(dataEstesa(iso)) + "'><span class='cal-n'>" + g + "</span>" + et + cellaPasto(iso, info, evs) + "</button>");
+      h.push("<button type='button' class='" + cls + "' onclick='apriGiorno(\"" + iso + "\")' aria-label='" + esc(dataEstesa(iso)) + "'><span class='cal-n'>" + g + "</span>" + et + chipEventoLavoro(iso) + cellaPasto(iso, info, evs) + "</button>");
     }
     iso = piuGiorni(iso, 1);
     colonna = (colonna + 1) % 7;
@@ -730,6 +731,7 @@ function renderHome() {
   h.push("</div>");
 
   var prossimi = attivi.filter(function (e) { return e.al >= oggi; }).sort(function (x, y) { return x.dal < y.dal ? -1 : 1; }).slice(0, 6);
+  h.push(bloccoEventiHome());
   h.push("<div class='dash-prossimi'><div class='sezione-titolo'><h2>Prossime assenze e presenze</h2>" + (prossimi.length ? "<button type='button' class='btn btn-testo btn-piccolo' onclick='vai(\"richieste\")'>Vedi tutte</button>" : "") + "</div>");
   if (!prossimi.length) h.push("<div class='vuoto'>Nessuna assenza in programma. Tocca un giorno del calendario per registrarne una.</div>");
   else h.push("<div class='lista'>" + prossimi.map(voceEvento).join("") + "</div>");
@@ -878,6 +880,7 @@ function apriGiorno(iso) {
   } else if (!lavorato) {
     h += "<button type='button' class='btn btn-primario' onclick='nuovaDa(\"PRESENZA\",\"" + iso + "\")'>Segna che ho lavorato</button>";
   }
+  h += sezioneEventiGiorno(iso);
   h += sezionePastiGiorno(iso, info, evs);
   if (pc) h += "<button type='button' class='btn btn-pericolo' onclick='confermaEliminaChiusura(\"" + pc.id + "\")'>Elimina la chiusura dal " + dataBreve(pc.dal) + " al " + dataBreve(pc.al) + "</button>";
   h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Chiudi</button>";
@@ -909,7 +912,9 @@ function renderNuova() {
   tipi.forEach(function (t) {
     h.push("<button type='button' role='tab' class='segmento" + (S.tipo === t[0] ? " attivo" : "") + "' onclick='scegliTipo(\"" + t[0] + "\")'>" + t[1] + "</button>");
   });
-  h.push("</div><div class='blocco'>");
+  h.push("</div>");
+  h.push("<button type='button' class='btn btn-evento' onclick='apriFormEventoLavoro(\"" + dal + "\")'>Evento di lavoro: fiera, corso, convegno, visita, trasferta</button>");
+  h.push("<div class='blocco'>");
 
   if (S.tipo === "FERIE") {
     h.push("<h3>Richiesta di ferie</h3>");
