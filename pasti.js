@@ -139,7 +139,9 @@ function apriPastoFuori(iso, proposta) {
   var data = p.data || iso || S.dati.oggi;
   var h = "<h2>Pasto fuori</h2><div class='sottotitolo'>Fotografa lo scontrino o la fattura: l'app prova a leggere locale, data e totale. Controlla sempre i dati prima di salvare.</div>";
   if (!proposta) {
-    h += "<label class='btn btn-primario'>Fotografa o scegli il documento<input type='file' accept='image/*,application/pdf' class='nascosto' onchange='scontrinoScelto(this,\"" + data + "\")'></label>";
+    h += "<div class='zona-carica' id='zona-SCONTRINO' ondragover='event.preventDefault();this.classList.add(\"sopra\")' ondragleave='this.classList.remove(\"sopra\")' ondrop='rilasciaScontrino(event,\"" + data + "\")'>";
+    h += "<div class='zona-testo'>Trascina qui lo scontrino o la fattura (PDF o immagine)</div>";
+    h += "<label class='btn btn-primario btn-piccolo'>Fotografa o scegli<input type='file' accept='image/*,application/pdf' class='nascosto' onchange='scontrinoScelto(this,\"" + data + "\")'></label></div>";
     h += "<button type='button' class='btn' onclick='apriPastoFuori(\"" + data + "\",{data:\"" + data + "\"})'>Inserisci a mano, senza documento</button>";
     h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Annulla</button>";
     apriFoglio(h);
@@ -156,6 +158,13 @@ function apriPastoFuori(iso, proposta) {
   if (max) h += "<p class='aiuto'>Rimborso massimo per pasto: " + euroPasto(max) + ".</p>";
   h += "<button type='button' class='btn btn-primario' onclick='salvaPastoFuori()'>Salva il pasto</button><button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Annulla</button>";
   apriFoglio(h);
+}
+
+function rilasciaScontrino(ev, data) {
+  ev.preventDefault();
+  el("zona-SCONTRINO").classList.remove("sopra");
+  var f = ev.dataTransfer && ev.dataTransfer.files ? ev.dataTransfer.files[0] : null;
+  if (f) scontrinoScelto({ files: [f], value: "" }, data);
 }
 
 function scontrinoScelto(input, data) {

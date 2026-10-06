@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "2.6.0";
+var VERSIONE = "2.6.1";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -1895,5 +1895,13 @@ function creaPromemoria() {
   });
 }
 
-/* Avvio quando tutti i file dell'app (app.js, pasti.js, fascicolo.js) sono caricati */
+/* Un file rilasciato fuori da una zona di caricamento non deve far aprire il file al posto dell'app */
+window.addEventListener("dragover", function (e) { if (!e.target.closest || !e.target.closest(".zona-carica")) e.preventDefault(); });
+window.addEventListener("drop", function (e) {
+  if (e.target.closest && e.target.closest(".zona-carica")) return;
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) avviso("Rilascia il file dentro il riquadro tratteggiato di caricamento.", true);
+});
+
+/* Avvio quando tutti i file dell'app (app.js, pasti.js, eventi.js, fascicolo.js) sono caricati */
 document.addEventListener("DOMContentLoaded", avvio);

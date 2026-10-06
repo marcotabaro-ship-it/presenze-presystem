@@ -144,7 +144,7 @@ function apriEventoLavoro(id) {
   if (e.stato === "ATTIVO") {
     h += "<div class='blocco' style='margin-top:12px'><h3>Carica un documento</h3>";
     h += campoTesto("el-tit", "Titolo (obbligatorio)", "", "text").replace("<input ", "<input oninput='zonaEventoAggiorna()' placeholder='Es. Biglietto SAIE Bologna' ");
-    h += "<div class='zona-carica bloccata' id='zona-EVENTO'><div class='zona-testo' id='zona-testo-EVENTO'>Scrivi prima il titolo: poi potrai scegliere il file</div>";
+    h += "<div class='zona-carica bloccata' id='zona-EVENTO' ondragover='trascinaEventoSopra(event)' ondragleave='this.classList.remove(\"sopra\")' ondrop='rilasciaEvento(event,\"" + id + "\")'><div class='zona-testo' id='zona-testo-EVENTO'>Scrivi prima il titolo: poi potrai trascinare qui il file</div>";
     h += "<label class='btn btn-primario btn-piccolo' id='zona-btn-EVENTO' onclick='if(!titoloEventoValido()){event.preventDefault();avviso(\"Scrivi prima il titolo del documento (almeno 3 caratteri).\",true);el(\"el-tit\").focus();}'>+ Carica<input type='file' id='zona-file-EVENTO' accept='application/pdf,image/*' class='nascosto' disabled onchange='fileEventoScelto(this,\"" + id + "\")'></label></div></div>";
     h += "<div class='azioni-riga' style='margin-top:12px'><button type='button' class='btn btn-piccolo' onclick='apriFormEventoLavoro(\"\",\"" + id + "\")'>Modifica</button><button type='button' class='btn btn-piccolo btn-pericolo' onclick='confermaAnnullaEvento(\"" + id + "\")'>Annulla evento</button></div>";
   }
@@ -166,8 +166,21 @@ function zonaEventoAggiorna() {
   var z = el("zona-EVENTO"), t = el("zona-testo-EVENTO"), inp = el("zona-file-EVENTO");
   if (!z) return;
   z.classList.toggle("bloccata", !ok);
-  t.textContent = ok ? "Scegli il file (PDF o immagine, massimo 15 MB)" : "Scrivi prima il titolo: poi potrai scegliere il file";
+  t.textContent = ok ? "Trascina qui il file (PDF o immagine, massimo 15 MB)" : "Scrivi prima il titolo: poi potrai trascinare qui il file";
   inp.disabled = !ok;
+}
+
+function trascinaEventoSopra(ev) {
+  ev.preventDefault();
+  if (titoloEventoValido()) el("zona-EVENTO").classList.add("sopra");
+}
+
+function rilasciaEvento(ev, id) {
+  ev.preventDefault();
+  el("zona-EVENTO").classList.remove("sopra");
+  if (!titoloEventoValido()) { avviso("Scrivi prima il titolo del documento (almeno 3 caratteri).", true); el("el-tit").focus(); return; }
+  var f = ev.dataTransfer && ev.dataTransfer.files ? ev.dataTransfer.files[0] : null;
+  if (f) fileEventoScelto({ files: [f], value: "" }, id);
 }
 
 function fileEventoScelto(input, id) {
