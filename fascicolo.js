@@ -117,14 +117,18 @@ function scaricaBlob(blob, nomeFile) {
   setTimeout(function () { URL.revokeObjectURL(u); }, 30000);
 }
 
-/* Il file viene preparato prima, poi un tocco lo condivide (i telefoni lo richiedono) */
+/* Apri: il file si apre subito nel visualizzatore di Google Drive (serve essere collegati con l'account Google).
+   Condividi: il file arriva sul dispositivo, si vede in anteprima nell'app e si può mandare o salvare. */
+function linkApri(docId, testo) {
+  var d = docDaId(docId);
+  if (d && d.fileId) return "<a class='btn btn-piccolo' href='" + esc(urlDrive(d.fileId)) + "' target='_blank' rel='noopener'>" + esc(testo) + "</a>";
+  return "<button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + docId + "\")'>" + esc(testo) + "</button>";
+}
+
 function apriDocumento(id) {
   chiama("ecoScaricaDocumento", [id], function (res) {
     S.fileCorrente = res;
-    var h = "<h2>File pronto</h2><div class='sottotitolo'>" + esc(res.nomeFile) + "</div>";
-    h += "<button type='button' class='btn btn-primario' onclick='condividiFileCorrente()'>Apri o condividi</button>";
-    h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Chiudi</button>";
-    apriFoglio(h);
+    mostraAnteprima(res.nomeFile, res.mime, res.base64, condividiFileCorrente);
   });
 }
 
@@ -397,7 +401,7 @@ function vistaBuste() {
       if (b && b.controllo && (Math.abs(b.controllo.diffFerie) > 0.01 || Math.abs(b.controllo.diffPerm) > 0.01)) segnali = "<span class='pill pill-attesa'>Differenze</span>";
       else if (b && b.controllo) segnali = "<span class='pill pill-ok'>Controllo ok</span>";
       h.push("<div class='voce voce-" + (b ? "ok" : "attesa") + "'><div class='voce-corpo'><div class='voce-titolo'>" + esc(titolo) + "</div><div class='voce-sub'>" + esc(stato) + (p.doc ? ", PDF presente" : ", PDF non caricato") + "</div></div>" + segnali + "<div class='azioni-riga'>");
-      if (p.doc) h.push("<button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + p.doc.id + "\")'>PDF</button>");
+      if (p.doc) h.push(linkApri(p.doc.id, "PDF"));
       if (b) h.push("<button type='button' class='btn btn-piccolo btn-primario' onclick='vediBusta(\"" + b.id + "\")'>Dati</button>");
       else h.push("<button type='button' class='btn btn-piccolo btn-primario' onclick='nuovaBusta(\"" + p.mese + "\",\"" + anno + "\",\"" + esc(p.tipoBusta) + "\")'>Inserisci dati</button>");
       h.push("</div></div>");
@@ -543,7 +547,10 @@ function dettaglioBusta() {
   }
   if (b.note) h.push("<p class='aiuto' style='margin-top:10px'>Note: " + esc(b.note) + "</p>");
   h.push("<div class='azioni-riga' style='margin-top:12px'>");
-  if (b.documentoId && docDaId(b.documentoId)) h.push("<button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + b.documentoId + "\")'>Apri il PDF</button>");
+  if (b.documentoId && docDaId(b.documentoId)) {
+    h.push(linkApri(b.documentoId, "Apri il PDF"));
+    h.push("<button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + b.documentoId + "\")'>Condividi</button>");
+  }
   if (b.stato === "ATTIVA") h.push("<button type='button' class='btn btn-piccolo btn-primario' onclick='correggiBusta(\"" + b.id + "\")'>Correggi i dati</button>");
   h.push("</div></div>");
   return h.join("");
@@ -569,7 +576,7 @@ function vistaCU() {
   k.forEach(function (a) {
     var x = anni[a];
     h.push("<div class='blocco'><div class='sezione-titolo' style='margin-top:0'><h3>CU " + esc(a) + "</h3><div class='azioni-riga'>");
-    if (x.doc) h.push("<button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + x.doc.id + "\")'>PDF</button>");
+    if (x.doc) h.push(linkApri(x.doc.id, "PDF"));
     h.push("<button type='button' class='btn btn-piccolo btn-primario' onclick='nuovaCU(\"" + a + "\")'>" + (x.cu ? "Correggi i dati" : "Inserisci dati") + "</button></div></div>");
     if (x.cu) {
       h.push("<div class='dettagli'>");
@@ -869,7 +876,7 @@ var NOMI_TIPO_DOC = { BUSTA: "Busta paga", CU: "CU", DOCUMENTO: "Documento", AUT
 function rigaDocumento(d) {
   var att = d.stato === "ATTIVO";
   var sub = NOMI_TIPO_DOC[d.tipo] + (d.categoria && d.tipo !== "CU" ? ", " + d.categoria : "") + ", caricato il " + dataBreve(d.caricato) + (att ? "" : ", obsoleto dal " + dataBreve(d.obsoleto));
-  return "<div class='dest" + (att ? "" : " dest-obs") + "'><div class='dest-corpo'><div class='dest-nome'>" + esc(d.titolo || d.nomeFile) + "</div><div class='dest-mail'>" + esc(sub) + "</div></div><div class='azioni-riga'><button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + d.id + "\")'>Apri</button><button type='button' class='btn btn-piccolo" + (att ? " btn-pericolo" : "") + "' onclick='statoDocumento(\"" + d.id + "\",\"" + (att ? "OBSOLETO" : "ATTIVO") + "\")'>" + (att ? "Obsoleto" : "Riattiva") + "</button></div></div>";
+  return "<div class='dest" + (att ? "" : " dest-obs") + "'><div class='dest-corpo'><div class='dest-nome'>" + esc(d.titolo || d.nomeFile) + "</div><div class='dest-mail'>" + esc(sub) + "</div></div><div class='azioni-riga'>" + linkApri(d.id, "Apri") + "<button type='button' class='btn btn-piccolo' onclick='apriDocumento(\"" + d.id + "\")'>Condividi</button><button type='button' class='btn btn-piccolo" + (att ? " btn-pericolo" : "") + "' onclick='statoDocumento(\"" + d.id + "\",\"" + (att ? "OBSOLETO" : "ATTIVO") + "\")'>" + (att ? "Obsoleto" : "Riattiva") + "</button></div></div>";
 }
 
 function vistaDocumenti() {

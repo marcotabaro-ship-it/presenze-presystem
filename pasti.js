@@ -238,6 +238,7 @@ function bloccoNotaSpese() {
     h += "<div class='anteprima'>Nota spese pronta: " + r.pasti + " pasti, " + euroPasto(r.totale) + (r.totaleRimborsabile !== r.totale ? ", rimborsabile " + euroPasto(r.totaleRimborsabile) : "") + ".</div>";
     if (r.allegatiPdf) h += "<div class='avvertenza'>" + r.allegatiPdf + (r.allegatiPdf === 1 ? " documento è" : " documenti sono") + " in PDF: allegali alla mail oltre alla nota spese (li trovi in Fascicolo lavoro, cartella Note spese).</div>";
     h += "<a class='btn btn-primario' href='" + esc(r.mail.mailto) + "'>Apri la mail in Outlook</a>";
+    h += "<button type='button' class='btn' onclick='visualizzaNotaSpese()'>Visualizza il PDF</button>";
     h += "<button type='button' class='btn' onclick='condividiNotaSpese()'>Condividi il PDF</button>";
   }
   h += "</div>";
@@ -253,6 +254,11 @@ function generaNotaSpese() {
     renderRapportino();
     avviso("Nota spese salvata su Drive");
   });
+}
+
+function visualizzaNotaSpese() {
+  if (!S.fileNotaSpese) return;
+  mostraAnteprima(S.fileNotaSpese.nomeFile, "application/pdf", S.fileNotaSpese.pdf, condividiNotaSpese);
 }
 
 function condividiNotaSpese() {

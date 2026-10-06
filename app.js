@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "2.4.0";
+var VERSIONE = "2.5.0";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -1272,6 +1272,7 @@ function renderRapportino() {
     h.push("</div>");
     h.push("<ol class='passi'><li>Apri la mail in Outlook: destinatari, oggetto e testo sono già pronti.</li><li>Torna qui e tocca Condividi il PDF, poi scegli Salva su File.</li><li>In Outlook tocca la graffetta, allega il PDF da File e invia.</li></ol>");
     h.push("<a class='btn btn-primario' href='" + esc(r.mail.mailto) + "'>Apri la mail in Outlook</a>");
+    h.push("<button type='button' class='btn' onclick='visualizzaPdfCorrente()'>Visualizza il PDF</button>");
     h.push("<button type='button' class='btn' onclick='condividiPdf()'>Condividi il PDF</button>");
     h.push("<a class='btn btn-testo' href='" + esc(r.url) + "' target='_blank' rel='noopener'>Visualizza su Drive</a>");
     h.push("</div>");
@@ -1287,7 +1288,7 @@ function renderRapportino() {
     h.push("<div class='lista archivio'>");
     arch.forEach(function (a) {
       var p = a.mese.split("-");
-      h.push("<div class='voce'><div class='voce-corpo'><div class='voce-titolo'>" + maiusc(MESI[Number(p[1]) - 1]) + " " + p[0] + "</div><div class='voce-sub'>Generato il " + esc(dataBreve(a.generato) + " " + a.generato.substr(11, 5)) + "</div></div><button type='button' class='btn btn-piccolo' onclick='prendiDallArchivio(\"" + a.id + "\")'>PDF</button></div>");
+      h.push("<div class='voce'><div class='voce-corpo'><div class='voce-titolo'>" + maiusc(MESI[Number(p[1]) - 1]) + " " + p[0] + "</div><div class='voce-sub'>Generato il " + esc(dataBreve(a.generato) + " " + a.generato.substr(11, 5)) + "</div></div><div class='azioni-riga'><a class='btn btn-piccolo' href='" + esc(urlDrive(a.id)) + "' target='_blank' rel='noopener'>Apri</a><button type='button' class='btn btn-piccolo' onclick='prendiDallArchivio(\"" + a.id + "\")'>Condividi</button></div></div>");
     });
     h.push("</div>");
   }
@@ -1392,11 +1393,119 @@ function scaricaPdf(blob) {
 function prendiDallArchivio(idFile) {
   chiama("scaricaRapportino", [idFile], function (res) {
     PDF_CORRENTE = res;
-    var h = "<h2>PDF pronto</h2><div class='sottotitolo'>" + esc(res.nomeFile) + "</div>";
-    h += "<button type='button' class='btn btn-primario' onclick='condividiPdf()'>Condividi il PDF</button>";
-    h += "<button type='button' class='btn btn-testo' onclick='chiudiFoglio()'>Chiudi</button>";
-    apriFoglio(h);
+    visualizzaPdfCorrente();
   });
+}
+
+function visualizzaPdfCorrente() {
+  if (!PDF_CORRENTE) return;
+  mostraAnteprima(PDF_CORRENTE.nomeFile, "application/pdf", PDF_CORRENTE.pdf, condividiPdf);
+}
+
+/* ---------------------------------------------------------
+   VISUALIZZATORE INTERNO: immagini e PDF a tutto schermo
+   I PDF si disegnano con PDF.js (caricato solo la prima volta che serve).
+   --------------------------------------------------------- */
+var PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+var PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+var PDFJS_PRONTO = null;
+var VISORE_AZIONE = null;
+var VISORE_URL = null;
+
+function urlDrive(fileId) {
+  return "https://drive.google.com/file/d/" + encodeURIComponent(fileId) + "/view";
+}
+
+function caricaPdfJs() {
+  if (PDFJS_PRONTO) return PDFJS_PRONTO;
+  PDFJS_PRONTO = new Promise(function (ok, ko) {
+    if (window.pdfjsLib) { ok(window.pdfjsLib); return; }
+    var sc = document.createElement("script");
+    sc.src = PDFJS_URL;
+    sc.onload = function () {
+      if (!window.pdfjsLib) { ko(new Error("PDF.js non disponibile")); return; }
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      ok(window.pdfjsLib);
+    };
+    sc.onerror = function () { PDFJS_PRONTO = null; ko(new Error("PDF.js non raggiungibile")); };
+    document.head.appendChild(sc);
+  });
+  return PDFJS_PRONTO;
+}
+
+function byteDaBase64(base64) {
+  var bin = atob(base64);
+  var byte = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) byte[i] = bin.charCodeAt(i);
+  return byte;
+}
+
+function mostraAnteprima(nomeFile, mime, base64, azioneCondividi) {
+  chiudiFoglio();
+  VISORE_AZIONE = azioneCondividi || null;
+  var v = el("visore");
+  if (!v) {
+    v = document.createElement("div");
+    v.id = "visore";
+    v.setAttribute("role", "dialog");
+    v.setAttribute("aria-modal", "true");
+    document.body.appendChild(v);
+  }
+  v.innerHTML = "<div class='visore-testa'><div class='visore-nome'>" + esc(nomeFile) + "</div><div class='azioni-riga'>" +
+    (VISORE_AZIONE ? "<button type='button' class='btn btn-piccolo' onclick='VISORE_AZIONE()'>Condividi</button>" : "") +
+    "<button type='button' class='btn btn-piccolo btn-primario' onclick='chiudiAnteprima()'>Chiudi</button></div></div><div class='visore-corpo' id='visoreCorpo'><div class='vuoto'>Apertura del file...</div></div>";
+  v.classList.add("aperto");
+  document.body.classList.add("visore-aperto");
+  var corpo = el("visoreCorpo");
+  var tipo = String(mime || "").toLowerCase();
+  if (tipo.indexOf("image/") === 0) {
+    corpo.innerHTML = "<img class='visore-img' alt='' src='data:" + esc(tipo) + ";base64," + base64 + "'>";
+    return;
+  }
+  if (tipo === "application/pdf" || /\.pdf$/i.test(nomeFile)) {
+    var byte = byteDaBase64(base64);
+    caricaPdfJs().then(function (lib) {
+      return lib.getDocument({ data: byte }).promise.then(function (pdf) {
+        corpo.innerHTML = "";
+        var larghezza = Math.min(corpo.clientWidth - 16, 1100);
+        var catena = Promise.resolve();
+        for (var n = 1; n <= pdf.numPages; n++) {
+          (function (num) {
+            catena = catena.then(function () {
+              return pdf.getPage(num).then(function (pag) {
+                var base = pag.getViewport({ scale: 1 });
+                var scala = larghezza / base.width;
+                var dpr = Math.min(window.devicePixelRatio || 1, 2);
+                var vp = pag.getViewport({ scale: scala * dpr });
+                var c = document.createElement("canvas");
+                c.className = "visore-pagina";
+                c.width = Math.floor(vp.width);
+                c.height = Math.floor(vp.height);
+                c.style.width = Math.floor(vp.width / dpr) + "px";
+                corpo.appendChild(c);
+                return pag.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+              });
+            });
+          })(n);
+        }
+        return catena;
+      });
+    }).catch(function () {
+      /* Se PDF.js non si carica (rete assente), uso il visualizzatore del sistema */
+      if (VISORE_URL) URL.revokeObjectURL(VISORE_URL);
+      VISORE_URL = URL.createObjectURL(new Blob([byte], { type: "application/pdf" }));
+      corpo.innerHTML = "<iframe class='visore-frame' title='PDF' src='" + VISORE_URL + "'></iframe>";
+    });
+    return;
+  }
+  corpo.innerHTML = "<div class='vuoto'>Anteprima non disponibile per questo tipo di file: usa Condividi.</div>";
+}
+
+function chiudiAnteprima() {
+  var v = el("visore");
+  if (v) { v.classList.remove("aperto"); v.innerHTML = ""; }
+  document.body.classList.remove("visore-aperto");
+  if (VISORE_URL) { URL.revokeObjectURL(VISORE_URL); VISORE_URL = null; }
 }
 
 function cambiaMeseRapportino() {
