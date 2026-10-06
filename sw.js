@@ -1,6 +1,6 @@
 /* Lavoro Pre System - service worker
    Cambia CACHE a ogni nuova versione pubblicata */
-var CACHE = "pps-2.3.0";
+var CACHE = "pps-2.4.0";
 var FILES = [
   "./",
   "./index.html",

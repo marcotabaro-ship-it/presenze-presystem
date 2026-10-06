@@ -211,6 +211,7 @@ function sbloccaArea() {
   api("sbloccaArea", [pin]).then(function (res) {
     el("attesa").classList.add("nascosto");
     S.sess = { chiave: res.sess, ultimo: Date.now() };
+    if (res.eco) { S.eco = res.eco; if (!S.fAnno) S.fAnno = S.dati.oggi.substr(0, 4); }
     renderFascicolo();
   }).catch(function (err) {
     el("attesa").classList.add("nascosto");
@@ -219,8 +220,8 @@ function sbloccaArea() {
   });
 }
 
-function caricaEco(dopo) {
-  chiama("ecoDati", [], function (res) {
+function caricaEco(dopo, forza) {
+  chiama("ecoDati", [forza === true], function (res) {
     S.eco = res;
     if (!S.fAnno) S.fAnno = S.dati.oggi.substr(0, 4);
     if (S.vista === "fascicolo") renderFascicolo();

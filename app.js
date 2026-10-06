@@ -18,7 +18,7 @@ var S = {
   festCache: {}
 };
 
-var VERSIONE = "2.3.0";
+var VERSIONE = "2.4.0";
 var MOTORE_URL = "https://script.google.com/macros/s/AKfycbySj9SRP6ypLpuLRW7nSOkRzedhBRIiHeO3WgsZh1kEFWQgQ_zj1izi7Jv_8ZSBkdSn/exec";
 var APP_URL = "https://marcotabaro-ship-it.github.io/presenze-presystem/";
 var CHIAVE_TOKEN = "pps.token";
@@ -239,24 +239,31 @@ function leggiCache() {
 
 function oggiLocale() { return isoDaData(new Date()); }
 
-/* Le chiamate al motore dati partono una alla volta (coda), per non sovrapporle.
-   Google a volte risponde 404 anche se lo script ha lavorato correttamente:
-   le letture vengono ritentate da sole, le scritture no (si eviterebbero doppioni). */
-var CODA_API = Promise.resolve();
+/* Chiamate al motore dati.
+   - Le letture partono in parallelo; le scritture una alla volta (coda), per non sovrapporre modifiche.
+   - Ogni chiamata ha un tempo massimo: una richiesta appesa non blocca più tutte le altre.
+   - Le letture fallite per un problema di Google vengono ritentate da sole; le scritture no (si eviterebbero doppioni). */
+var CODA_SCRITTURE = Promise.resolve();
 var AZIONI_RIPETIBILI = ["getDatiIniziali", "getSaldo", "ecoDati", "getLogoAnteprima", "ecoScaricaDocumento", "scaricaRapportino", "mailEvento",
-  "reportPeriodo", "accediConPin", "sbloccaArea", "bloccaArea", "generaRapportino", "salvaImpostazioni", "salvaTesti", "salvaSaldo", "creaPromemoriaProva"];
+  "reportPeriodo", "accediConPin", "sbloccaArea", "bloccaArea", "getQrMensa", "generaRapportino", "salvaImpostazioni", "salvaTesti", "salvaSaldo", "creaPromemoriaProva"];
+var AZIONI_SOLA_LETTURA = ["getDatiIniziali", "getSaldo", "ecoDati", "getLogoAnteprima", "ecoScaricaDocumento", "scaricaRapportino", "mailEvento",
+  "reportPeriodo", "accediConPin", "sbloccaArea", "bloccaArea", "getQrMensa"];
+/* Operazioni lunghe (lettura di documenti, creazione di PDF, invio di file): tempo massimo più ampio */
+var AZIONI_LUNGHE = ["generaRapportino", "caricaScontrino", "ecoLeggiLibretto", "ecoCaricaDocumento", "generaNotaSpese", "ecoScaricaDocumento",
+  "scaricaRapportino", "caricaQrMensa", "caricaLogo", "reportPeriodo", "creaPromemoriaMensile", "creaPromemoriaProva"];
 
 function api(azione, args, cfgProva) {
-  var p = CODA_API.then(function () { return apiConTentativi(azione, args, cfgProva, 0); });
-  CODA_API = p.catch(function () { });
+  if (AZIONI_SOLA_LETTURA.indexOf(azione) >= 0) return apiConTentativi(azione, args, cfgProva, 0);
+  var p = CODA_SCRITTURE.then(function () { return apiConTentativi(azione, args, cfgProva, 0); });
+  CODA_SCRITTURE = p.catch(function () { });
   return p;
 }
 
 function apiConTentativi(azione, args, cfgProva, tentativo) {
   return apiDiretta(azione, args, cfgProva).catch(function (err) {
-    var transitorio = err && (err.stato === 404 || err.stato >= 500 || err.name === "TypeError");
+    var transitorio = err && (err.stato === 404 || err.stato >= 500 || err.name === "TypeError" || err.scaduta);
     if (transitorio && AZIONI_RIPETIBILI.indexOf(azione) >= 0 && tentativo < 2 && navigator.onLine) {
-      return new Promise(function (ok) { setTimeout(ok, 700 * (tentativo + 1)); }).then(function () {
+      return new Promise(function (ok) { setTimeout(ok, 600 * (tentativo + 1)); }).then(function () {
         return apiConTentativi(azione, args, cfgProva, tentativo + 1);
       });
     }
@@ -280,11 +287,26 @@ function apiDiretta(azione, args, cfgProva) {
   var corpo = JSON.stringify({ token: cfg.token, azione: azione, args: args || [], sess: (S.sess && S.sess.chiave) ? S.sess.chiave : "" });
   var codificato = encodeURIComponent(corpo);
   var richiesta;
+  var controllo = typeof AbortController !== "undefined" ? new AbortController() : null;
+  var limite = AZIONI_LUNGHE.indexOf(azione) >= 0 ? 150000 : 30000;
+  var scaduta = false;
+  var timer = controllo ? setTimeout(function () { scaduta = true; controllo.abort(); }, limite) : null;
+  var opzioni = { redirect: "follow", cache: "no-store" };
+  if (controllo) opzioni.signal = controllo.signal;
   if (codificato.length < 1900) {
-    richiesta = fetch(cfg.url + "?payload=" + codificato, { method: "GET", redirect: "follow", cache: "no-store" });
+    opzioni.method = "GET";
+    richiesta = fetch(cfg.url + "?payload=" + codificato, opzioni);
   } else {
-    richiesta = fetch(cfg.url, { method: "POST", redirect: "follow", cache: "no-store", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: corpo });
+    opzioni.method = "POST";
+    opzioni.headers = { "Content-Type": "text/plain;charset=utf-8" };
+    opzioni.body = corpo;
+    richiesta = fetch(cfg.url, opzioni);
   }
+  richiesta = richiesta.then(function (r) { if (timer) clearTimeout(timer); return r; }, function (err) {
+    if (timer) clearTimeout(timer);
+    if (scaduta) { var e0 = new Error("Il motore dati non ha risposto entro " + Math.round(limite / 1000) + " secondi."); e0.scaduta = true; throw e0; }
+    throw err;
+  });
   return richiesta.then(function (r) {
     if (!r.ok) { var e1 = new Error("Il motore dati ha risposto con errore " + r.status + "."); e1.stato = r.status; throw e1; }
     return r.json();
@@ -407,11 +429,12 @@ function avvio() {
   }
 }
 
-function sincronizza(bloccante, silenzioso) {
+function sincronizza(bloccante, silenzioso, forza) {
   if (!leggiCfg()) return;
   if (bloccante) el("attesa").classList.remove("nascosto");
   el("statoSync").textContent = "Aggiornamento in corso";
-  api("getDatiIniziali", []).then(function (d) {
+  if (forza === true && S.sess && S.vista === "fascicolo" && typeof caricaEco === "function") caricaEco(null, true);
+  api("getDatiIniziali", [forza === true]).then(function (d) {
     el("attesa").classList.add("nascosto");
     var primo = !S.dati;
     S.dati = d;
